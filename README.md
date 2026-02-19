@@ -1,8 +1,8 @@
-# Moonside Home Assistant Integration
+<img src="custom_components/moonside/icon.png" width="128" height="128" alt="Moonside Icon">
+
+# Home Assistant Integration - Moonside
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
-
-<img src="custom_components/moonside/icon.png" width="128" height="128" alt="Moonside Icon">
 
 Home Assistant custom integration for Moonside smart lights (Lighthouse, Neon, etc.) using Bluetooth Low Energy (BLE).
 
