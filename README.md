@@ -112,4 +112,4 @@ MIT License
 
 ## Support
 
-- [GitHub Issues](https://github.com/moonside-ha/moonside/issues)
+- [GitHub Issues](https://github.com/skeltavik/moonside/issues)
