@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any
 
 from bleak import BleakClient, BleakScanner
@@ -29,10 +30,13 @@ from .const import (
 
 LOGGER = logging.getLogger(__name__)
 
-# Connection timeout
 CONNECT_TIMEOUT = 30
 DISCONNECT_TIMEOUT = 5
 COMMAND_TIMEOUT = 10
+
+SERVICE_PULSE = "pulse"
+SERVICE_STROBE = "strobe"
+SERVICE_COLOR_CYCLE = "color_cycle"
 
 
 class MoonsideInstance:
@@ -60,7 +64,10 @@ class MoonsideInstance:
         self._rgb_color: tuple[int, int, int] = (255, 255, 255)
         self._effect: str | None = None
 
-        # Lock for thread-safe operations
+        self._rssi: int | None = None
+        self._last_connected: datetime | None = None
+        self._last_update: datetime | None = None
+
         self._lock = asyncio.Lock()
 
     @property
@@ -90,8 +97,23 @@ class MoonsideInstance:
 
     @property
     def effect(self) -> str | None:
-        """Return current effect name."""
         return self._effect
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    @property
+    def rssi(self) -> int | None:
+        return self._rssi
+
+    @property
+    def last_connected(self) -> datetime | None:
+        return self._last_connected
+
+    @property
+    def last_update(self) -> datetime | None:
+        return self._last_update
 
     @property
     def available(self) -> bool:
@@ -262,22 +284,44 @@ class MoonsideInstance:
         return await self._send_command(command)
 
     async def apply_pixels(self) -> bool:
-        """Apply pixel settings."""
         return await self._send_command(CMD_MODE_PIXEL)
 
     async def update(self) -> bool:
-        """Update device state.
-
-        Note: Moonside doesn't support state query, so we rely on
-        locally tracked state. This method ensures connection is valid.
-        """
         async with self._lock:
             if not await self._ensure_connected():
                 return False
+            self._last_update = datetime.now()
             return True
 
+    async def pulse(self, duration: float = 0.5) -> bool:
+        if not await self._send_command(CMD_LED_ON):
+            return False
+        await asyncio.sleep(duration)
+        if not await self._send_command(CMD_LED_OFF):
+            return False
+        return True
+
+    async def strobe(self, count: int = 3, duration: float = 0.2) -> bool:
+        for _ in range(count):
+            if not await self._send_command(CMD_LED_ON):
+                return False
+            await asyncio.sleep(duration)
+            if not await self._send_command(CMD_LED_OFF):
+                return False
+            await asyncio.sleep(duration)
+        return True
+
+    async def color_cycle(
+        self, colors: list[tuple[int, int, int]], duration: float = 2.0
+    ) -> bool:
+        delay = duration / len(colors)
+        for color in colors:
+            if not await self.set_color(color):
+                return False
+            await asyncio.sleep(delay)
+        return True
+
     async def stop(self) -> None:
-        """Stop the connection."""
         async with self._lock:
             if self._client and self._client.is_connected:
                 try:

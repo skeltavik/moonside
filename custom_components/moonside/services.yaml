@@ -30,3 +30,97 @@ set_pixel:
           max: 120
           step: 1
           mode: slider
+
+pulse:
+  name: Pulse
+  description: Pulse the light on and off once.
+  fields:
+    entity_id:
+      name: Entity
+      description: The Moonside light entity to control.
+      required: true
+      selector:
+        entity:
+          domain: light
+          integration: moonside
+    duration:
+      name: Duration
+      description: How long the light stays on in seconds.
+      required: false
+      default: 0.5
+      selector:
+        number:
+          min: 0.1
+          max: 5.0
+          step: 0.1
+          unit_of_measurement: seconds
+          mode: slider
+
+strobe:
+  name: Strobe
+  description: Strobe the light on and off multiple times.
+  fields:
+    entity_id:
+      name: Entity
+      description: The Moonside light entity to control.
+      required: true
+      selector:
+        entity:
+          domain: light
+          integration: moonside
+    count:
+      name: Count
+      description: Number of on/off cycles.
+      required: false
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          mode: slider
+    duration:
+      name: Duration
+      description: Duration of each on/off phase in seconds.
+      required: false
+      default: 0.2
+      selector:
+        number:
+          min: 0.1
+          max: 1.0
+          step: 0.1
+          unit_of_measurement: seconds
+          mode: slider
+
+color_cycle:
+  name: Color Cycle
+  description: Cycle through multiple colors.
+  fields:
+    entity_id:
+      name: Entity
+      description: The Moonside light entity to control.
+      required: true
+      selector:
+        entity:
+          domain: light
+          integration: moonside
+    colors:
+      name: Colors
+      description: List of RGB colors to cycle through (e.g., "[[255,0,0],[0,255,0],[0,0,255]]").
+      required: true
+      example: "[[255,0,0],[0,255,0],[0,0,255]]"
+      selector:
+        text:
+          multiline: false
+    duration:
+      name: Duration
+      description: Total duration of the color cycle in seconds.
+      required: false
+      default: 2.0
+      selector:
+        number:
+          min: 0.5
+          max: 10.0
+          step: 0.5
+          unit_of_measurement: seconds
+          mode: slider

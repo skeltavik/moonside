@@ -25,15 +25,50 @@ LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,
+    Platform.SENSOR,
 ]
 
 SERVICE_SET_PIXEL = "set_pixel"
+SERVICE_PULSE = "pulse"
+SERVICE_STROBE = "strobe"
+SERVICE_COLOR_CYCLE = "color_cycle"
 
 SET_PIXEL_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
         vol.Required("pixel_id"): vol.All(vol.Coerce(int), vol.Range(min=0, max=89)),
         vol.Required("brightness"): vol.All(vol.Coerce(int), vol.Range(min=0, max=120)),
+    }
+)
+
+PULSE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
+        vol.Optional("duration", default=0.5): vol.All(
+            vol.Coerce(float), vol.Range(min=0.1, max=5.0)
+        ),
+    }
+)
+
+STROBE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
+        vol.Optional("count", default=3): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=10)
+        ),
+        vol.Optional("duration", default=0.2): vol.All(
+            vol.Coerce(float), vol.Range(min=0.1, max=1.0)
+        ),
+    }
+)
+
+COLOR_CYCLE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
+        vol.Required("colors"): cv.string,
+        vol.Optional("duration", default=2.0): vol.All(
+            vol.Coerce(float), vol.Range(min=0.5, max=10.0)
+        ),
     }
 )
 
@@ -65,14 +100,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.services.has_service(DOMAIN, SERVICE_SET_PIXEL):
 
         async def async_handle_set_pixel(call: ServiceCall) -> None:
-            """Handle the set_pixel service call."""
             entity_ids = call.data[ATTR_ENTITY_ID]
             pixel_id = call.data["pixel_id"]
             brightness = call.data["brightness"]
 
-            # Find the instance for the given entity
             for entry_id, instance in hass.data[DOMAIN].items():
-                # Get the entity registry to find entity IDs
                 from homeassistant.helpers import entity_registry as er
 
                 ent_reg = er.async_get(hass)
@@ -101,6 +133,101 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             schema=SET_PIXEL_SCHEMA,
         )
 
+        async def async_handle_pulse(call: ServiceCall) -> None:
+            entity_ids = call.data[ATTR_ENTITY_ID]
+            duration = call.data["duration"]
+
+            for entry_id, instance in hass.data[DOMAIN].items():
+                from homeassistant.helpers import entity_registry as er
+
+                ent_reg = er.async_get(hass)
+                entity_entries = [
+                    entry
+                    for entry in ent_reg.entities.values()
+                    if entry.config_entry_id == entry_id
+                    and entry.entity_id in entity_ids
+                ]
+
+                if entity_entries:
+                    await instance.pulse(duration)
+                    LOGGER.debug("Pulse executed for %s", instance.name)
+                    break
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_PULSE,
+            async_handle_pulse,
+            schema=PULSE_SCHEMA,
+        )
+
+        async def async_handle_strobe(call: ServiceCall) -> None:
+            entity_ids = call.data[ATTR_ENTITY_ID]
+            count = call.data["count"]
+            duration = call.data["duration"]
+
+            for entry_id, instance in hass.data[DOMAIN].items():
+                from homeassistant.helpers import entity_registry as er
+
+                ent_reg = er.async_get(hass)
+                entity_entries = [
+                    entry
+                    for entry in ent_reg.entities.values()
+                    if entry.config_entry_id == entry_id
+                    and entry.entity_id in entity_ids
+                ]
+
+                if entity_entries:
+                    await instance.strobe(count, duration)
+                    LOGGER.debug("Strobe executed for %s", instance.name)
+                    break
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_STROBE,
+            async_handle_strobe,
+            schema=STROBE_SCHEMA,
+        )
+
+        async def async_handle_color_cycle(call: ServiceCall) -> None:
+            entity_ids = call.data[ATTR_ENTITY_ID]
+            colors_str = call.data["colors"]
+            duration = call.data["duration"]
+
+            import json
+
+            try:
+                colors = json.loads(colors_str)
+                if not isinstance(colors, list):
+                    LOGGER.error("Colors must be a list of RGB tuples")
+                    return
+                colors = [tuple(c) for c in colors]
+            except json.JSONDecodeError:
+                LOGGER.error("Invalid colors format: %s", colors_str)
+                return
+
+            for entry_id, instance in hass.data[DOMAIN].items():
+                from homeassistant.helpers import entity_registry as er
+
+                ent_reg = er.async_get(hass)
+                entity_entries = [
+                    entry
+                    for entry in ent_reg.entities.values()
+                    if entry.config_entry_id == entry_id
+                    and entry.entity_id in entity_ids
+                ]
+
+                if entity_entries:
+                    await instance.color_cycle(colors, duration)
+                    LOGGER.debug("Color cycle executed for %s", instance.name)
+                    break
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_COLOR_CYCLE,
+            async_handle_color_cycle,
+            schema=COLOR_CYCLE_SCHEMA,
+        )
+
     LOGGER.debug("Moonside device setup complete: %s", name)
     return True
 
@@ -119,6 +246,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Unregister services if no more entries
     if not hass.data[DOMAIN]:
         hass.services.async_remove(DOMAIN, SERVICE_SET_PIXEL)
+        hass.services.async_remove(DOMAIN, SERVICE_PULSE)
+        hass.services.async_remove(DOMAIN, SERVICE_STROBE)
+        hass.services.async_remove(DOMAIN, SERVICE_COLOR_CYCLE)
 
     return unload_ok
 
