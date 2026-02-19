@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Moonside",
+        "description": "Select a discovered Moonside device to set up.",
+        "data": {
+          "mac": "Device",
+          "name": "Name"
+        }
+      },
+      "manual": {
+        "title": "Moonside",
+        "description": "Enter your Moonside device details manually.",
+        "data": {
+          "mac": "MAC Address",
+          "name": "Name"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "Moonside",
+        "description": "Do you want to set up {name} ({address})?"
+      }
+    },
+    "abort": {
+      "already_configured": "Device is already configured",
+      "already_in_progress": "Configuration is already in progress",
+      "no_devices_found": "No Moonside devices found"
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "unknown": "Unexpected error"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+set_pixel:
+  name: Set Pixel
+  description: Set the brightness of an individual pixel on the Moonside light.
+  fields:
+    entity_id:
+      name: Entity
+      description: The Moonside light entity to control.
+      required: true
+      selector:
+        entity:
+          domain: light
+          integration: moonside
+    pixel_id:
+      name: Pixel ID
+      description: The pixel ID to set (0-89).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 89
+          step: 1
+          mode: box
+    brightness:
+      name: Brightness
+      description: The brightness level for the pixel (0-120).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 120
+          step: 1
+          mode: slider
