@@ -27,7 +27,7 @@ Home Assistant custom integration for Moonside smart lights (Lighthouse, Neon, e
 1. Open HACS in Home Assistant
 2. Click on "Integrations"
 3. Click the menu (⋮) and select "Custom repositories"
-4. Add `https://github.com/moonside-ha/moonside` as an Integration
+4. Add `https://github.com/skeltavik/moonside` as an Integration
 5. Click "Install"
 6. Restart Home Assistant
 
@@ -113,4 +113,3 @@ MIT License
 ## Support
 
 - [GitHub Issues](https://github.com/moonside-ha/moonside/issues)
-- [Home Assistant Community Forum](https://community.home-assistant.io/)
