@@ -82,7 +82,7 @@ This integration uses the reverse-engineered BLE protocol for Moonside devices:
 
 ### Requirements
 
-- Home Assistant 2023.1.0 or newer
+- Home Assistant 2024.1.0 or newer
 - Bluetooth adapter with BLE support
 - Moonside device within Bluetooth range
 
