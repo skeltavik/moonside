@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from bleak import BleakClient, BleakScanner
+from homeassistant.components.bluetooth import async_last_service_info
 from homeassistant.core import HomeAssistant
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
@@ -46,15 +47,18 @@ class MoonsideInstance:
         self,
         mac_address: str,
         name: str,
+        hass: HomeAssistant | None = None,
     ) -> None:
         """Initialize the Moonside instance.
 
         Args:
             mac_address: BLE MAC address of the device
             name: Name of the device
+            hass: Home Assistant instance (used for RSSI lookups)
         """
         self._mac = mac_address
         self._name = name
+        self._hass = hass
         self._client: BleakClient | None = None
         self._connected = False
 
@@ -275,12 +279,19 @@ class MoonsideInstance:
         return False
 
     async def set_pixel(self, pixel_id: int, brightness: int) -> bool:
-        """Set individual pixel brightness.
+        """Set individual pixel brightness (Lighthouse only).
 
         Args:
             pixel_id: Pixel ID (0-89)
             brightness: Brightness value (0-120)
         """
+        if self.model != "Lighthouse":
+            LOGGER.warning(
+                "set_pixel is only supported on Lighthouse devices (device is %s)",
+                self.model,
+            )
+            return False
+
         if pixel_id < 0 or pixel_id >= NUM_PIXELS:
             LOGGER.error("Invalid pixel ID: %d", pixel_id)
             return False
@@ -293,6 +304,13 @@ class MoonsideInstance:
         return await self._send_command(command)
 
     async def apply_pixels(self) -> bool:
+        """Apply pixel settings (Lighthouse only)."""
+        if self.model != "Lighthouse":
+            LOGGER.warning(
+                "apply_pixels is only supported on Lighthouse devices (device is %s)",
+                self.model,
+            )
+            return False
         return await self._send_command(CMD_MODE_PIXEL)
 
     async def update(self) -> bool:
@@ -314,6 +332,15 @@ class MoonsideInstance:
                     return False
 
                 self._last_update = datetime.now()
+
+                # Update RSSI from latest advertisement data
+                if self._hass:
+                    service_info = async_last_service_info(
+                        self._hass, self._mac, connectable=True
+                    )
+                    if service_info:
+                        self._rssi = service_info.rssi
+
                 return True
 
             except Exception as ex:
