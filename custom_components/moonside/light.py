@@ -108,13 +108,13 @@ class MoonsideLight(RestoreEntity, LightEntity):
             identifiers={(DOMAIN, self._instance.address)},
             name=self._instance.name,
             manufacturer="Moonside",
-            model="Lighthouse",
+            model=self._instance.model,
         )
 
     @property
     def should_poll(self) -> bool:
         """Return the polling state."""
-        return False
+        return True
 
     async def async_added_to_hass(self) -> None:
         """Run when entity is added to Home Assistant."""

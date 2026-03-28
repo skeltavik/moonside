@@ -118,7 +118,16 @@ class MoonsideInstance:
     @property
     def available(self) -> bool:
         """Return True if the device is available."""
-        return self._is_on is not None
+        return self._connected
+
+    @property
+    def model(self) -> str:
+        """Return the device model based on BLE name."""
+        if self._name and "L1" in self._name.upper():
+            return "Lamp One"
+        elif self._name and "NEON" in self._name.upper():
+            return "Neon"
+        return "Lighthouse"
 
     def _convert_brightness_to_device(self, brightness: int) -> int:
         """Convert Home Assistant brightness (0-255) to device brightness (0-120)."""
@@ -287,11 +296,30 @@ class MoonsideInstance:
         return await self._send_command(CMD_MODE_PIXEL)
 
     async def update(self) -> bool:
+        """Update device state by attempting connection.
+
+        Returns:
+            True if device is connected and responsive
+        """
         async with self._lock:
             if not await self._ensure_connected():
                 return False
-            self._last_update = datetime.now()
-            return True
+
+            # Try to read the service to verify device is responsive
+            try:
+                service = self._client.services.get_service(UART_SERVICE_UUID)
+                if not service:
+                    LOGGER.debug("UART service not available during update")
+                    self._connected = False
+                    return False
+
+                self._last_update = datetime.now()
+                return True
+
+            except Exception as ex:
+                LOGGER.debug("Error during update: %s", ex)
+                self._connected = False
+                return False
 
     async def pulse(self, duration: float = 0.5) -> bool:
         if not await self._send_command(CMD_LED_ON):
