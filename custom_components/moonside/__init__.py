@@ -80,7 +80,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     LOGGER.debug("Setting up Moonside device: %s (%s)", name, mac_address)
 
-    instance = MoonsideInstance(mac_address, name)
+    instance = MoonsideInstance(mac_address, name, hass)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = instance
 
