@@ -14,6 +14,7 @@ UART_TX_CHAR_UUID: Final = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 # Configuration keys
 CONF_MAC: Final = "mac"
 CONF_NAME: Final = "name"
+CONF_BLE_NAME: Final = "ble_name"
 
 # Default values
 DEFAULT_NAME: Final = "Moonside Light"
