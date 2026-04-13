@@ -11,7 +11,6 @@ Home Assistant custom integration for Moonside smart lights (Lighthouse, Neon, e
 - **Auto-discovery**: Automatically discovers Moonside devices via Bluetooth
 - **Full RGB Control**: Set any color with brightness control
 - **40+ Built-in Effects**: Rainbow, Fire, Wave, Beat, Gradient, Twinkle, Lava, and more
-- **State Restoration**: Restores previous state after Home Assistant restart
 - **Local Control**: No cloud required - direct BLE communication
 
 ## Supported Devices
@@ -90,7 +89,7 @@ This integration uses the reverse-engineered BLE protocol for Moonside devices:
 
 ### Device Not Discovered
 
-1. Ensure your Moonside light is powered on and in pairing mode (blinking)
+1. Ensure your Moonside light is powered on and advertising over Bluetooth
 2. Check that your Home Assistant host has a working Bluetooth adapter
 3. Try moving the device closer to your Home Assistant host
 4. Use manual configuration with the device identifier if auto-discovery fails
