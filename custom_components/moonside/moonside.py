@@ -149,9 +149,10 @@ class MoonsideInstance:
     @property
     def model(self) -> str:
         """Return the device model based on BLE name."""
-        if self._ble_name and "L1" in self._ble_name.upper():
+        ble_name = self._ble_name.upper() if self._ble_name else ""
+        if "L1" in ble_name or "O101" in ble_name:
             return "Lamp One"
-        elif self._ble_name and "NEON" in self._ble_name.upper():
+        elif "NEON" in ble_name:
             return "Neon"
         return "Lighthouse"
 
@@ -160,20 +161,22 @@ class MoonsideInstance:
         if not self._hass:
             return False
 
-        service_info = async_last_service_info(
-            self._hass, self._mac, connectable=True
-        ) or async_last_service_info(self._hass, self._mac, connectable=False)
+        for connectable in (True, False):
+            service_info = async_last_service_info(
+                self._hass, self._mac, connectable=connectable
+            )
+            if not service_info:
+                continue
 
-        if not service_info:
-            return False
+            monotonic_age = MONOTONIC_TIME() - service_info.time
+            if monotonic_age > ADVERTISEMENT_GRACE_PERIOD_SECONDS:
+                continue
 
-        monotonic_age = MONOTONIC_TIME() - service_info.time
-        if monotonic_age > ADVERTISEMENT_GRACE_PERIOD_SECONDS:
-            return False
+            self._rssi = service_info.rssi
+            self._last_seen_monotonic = service_info.time
+            return True
 
-        self._rssi = service_info.rssi
-        self._last_seen_monotonic = service_info.time
-        return True
+        return False
 
     def _convert_brightness_to_device(self, brightness: int) -> int:
         """Convert Home Assistant brightness (0-255) to device brightness (0-120)."""

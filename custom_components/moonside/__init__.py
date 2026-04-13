@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -21,6 +22,8 @@ from .const import CONF_BLE_NAME, CONF_NAME, DEFAULT_NAME, DOMAIN
 from .moonside import MoonsideInstance
 
 LOGGER = logging.getLogger(__name__)
+
+BLE_NAME_PATTERN = re.compile(r"^MOONSIDE-(?:O\d+|L\d+|NEON.*)$")
 
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,
@@ -234,7 +237,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 def _is_device_ble_name(value: str | None) -> bool:
     """Return whether a stored BLE name looks like a real Moonside device name."""
-    return bool(value and value.upper().startswith("MOONSIDE"))
+    return isinstance(value, str) and bool(BLE_NAME_PATTERN.match(value.upper()))
+
+
+def _derive_ble_name(entry: ConfigEntry, data: dict[str, Any]) -> str | None:
+    """Derive a BLE name for legacy entries when possible."""
+    for candidate in (data.get(CONF_BLE_NAME), data.get(CONF_NAME), entry.title):
+        if _is_device_ble_name(candidate):
+            return candidate
+    return None
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -249,9 +260,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     data: dict[str, Any] = dict(entry.data)
-    ble_name = data.get(CONF_BLE_NAME)
+    ble_name = _derive_ble_name(entry, data)
 
-    if not _is_device_ble_name(ble_name):
+    if ble_name:
+        data[CONF_BLE_NAME] = ble_name
+    else:
         data.pop(CONF_BLE_NAME, None)
 
     hass.config_entries.async_update_entry(entry, data=data, version=2)
