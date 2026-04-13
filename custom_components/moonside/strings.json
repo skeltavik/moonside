@@ -13,7 +13,7 @@
         "title": "Moonside",
         "description": "Enter your Moonside device details manually.",
         "data": {
-          "mac": "MAC Address",
+          "mac": "Device Identifier",
           "name": "Name"
         }
       },

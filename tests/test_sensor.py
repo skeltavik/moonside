@@ -1,7 +1,5 @@
 """Tests for Moonside sensor platform."""
 
-import pytest
-from unittest.mock import MagicMock
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import SIGNAL_STRENGTH_DECIBELS_MILLIWATT
 from custom_components.moonside.sensor import (
@@ -9,7 +7,6 @@ from custom_components.moonside.sensor import (
     MoonsideConnectionSensor,
     MoonsideLastUpdateSensor,
 )
-from custom_components.moonside.const import DOMAIN
 
 
 class TestMoonsideRssiSensor:
@@ -45,7 +42,17 @@ class TestMoonsideRssiSensor:
         )
 
         attrs = sensor.extra_state_attributes
-        assert attrs["mac_address"] == "AA:BB:CC:DD:EE:FF"
+        assert attrs["device_identifier"] == "AA:BB:CC:DD:EE:FF"
+
+    def test_rssi_sensor_device_info_uses_instance_model(self, mock_moonside_instance):
+        """Test sensor device info model follows the instance model."""
+        mock_moonside_instance.model = "Neon"
+        sensor = MoonsideRssiSensor(
+            instance=mock_moonside_instance,
+            entry_id="test_entry_id",
+        )
+
+        assert sensor.device_info["model"] == "Neon"
 
 
 class TestMoonsideConnectionSensor:
@@ -70,6 +77,16 @@ class TestMoonsideConnectionSensor:
         )
 
         assert sensor.native_value == "disconnected"
+
+    def test_sensor_availability_follows_instance(self, mock_moonside_instance):
+        """Sensor availability should follow the shared instance state."""
+        mock_moonside_instance.available = False
+        sensor = MoonsideConnectionSensor(
+            instance=mock_moonside_instance,
+            entry_id="test_entry_id",
+        )
+
+        assert sensor.available is False
 
 
 class TestMoonsideLastUpdateSensor:

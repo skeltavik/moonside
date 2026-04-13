@@ -11,7 +11,7 @@ Requirements:
 
 Usage:
     python test_moonside.py
-    python test_moonside.py --mac XX:XX:XX:XX:XX:XX
+    python test_moonside.py --identifier XX:XX:XX:XX:XX:XX
 """
 
 from __future__ import annotations
@@ -50,8 +50,8 @@ CMD_MODE_PIXEL = "MODEPIXEL"
 class MoonsideTester:
     """Test class for Moonside BLE communication."""
 
-    def __init__(self, mac_address: str):
-        self.mac_address = mac_address
+    def __init__(self, device_identifier: str):
+        self.device_identifier = device_identifier
         self.client: BleakClient | None = None
         self.rx_char: BleakGATTCharacteristic | None = None
         self.tx_char: BleakGATTCharacteristic | None = None
@@ -68,10 +68,7 @@ class MoonsideTester:
                 LOGGER.info(f"  Found: {name} ({device.address})")
                 devices_found.append((device.address, name))
 
-        scanner = BleakScanner(
-            detection_callback=device_found,
-            service_uuids=[UART_SERVICE_UUID],
-        )
+        scanner = BleakScanner(detection_callback=device_found)
 
         await scanner.start()
         await asyncio.sleep(timeout)
@@ -81,10 +78,10 @@ class MoonsideTester:
 
     async def connect(self) -> bool:
         """Connect to the Moonside device."""
-        LOGGER.info(f"🔗 Connecting to {self.mac_address}...")
+        LOGGER.info(f"🔗 Connecting to {self.device_identifier}...")
 
         try:
-            self.client = BleakClient(self.mac_address)
+            self.client = BleakClient(self.device_identifier)
             await self.client.connect()
 
             if not self.client.is_connected:
@@ -118,9 +115,12 @@ class MoonsideTester:
             LOGGER.info(f"   RX: {self.rx_char.uuid}")
             LOGGER.info(f"   TX: {self.tx_char.uuid}")
 
-            # Setup notification handler
-            await self.client.start_notify(self.tx_char, self._notification_handler)
-            LOGGER.info("✅ Notifications enabled")
+            # Setup notification handler when supported
+            try:
+                await self.client.start_notify(self.tx_char, self._notification_handler)
+                LOGGER.info("✅ Notifications enabled")
+            except Exception as e:
+                LOGGER.warning(f"⚠️ Notifications not available: {e}")
 
             return True
 
@@ -147,7 +147,7 @@ class MoonsideTester:
             data = command.encode("utf-8")
             LOGGER.info(f"📤 Sending: {command}")
 
-            await self.client.write_gatt_char(self.rx_char, data, response=False)
+            await self.client.write_gatt_char(self.rx_char, data, response=True)
 
             # Wait a bit for command processing
             await asyncio.sleep(0.1)
@@ -317,7 +317,7 @@ def print_report(results: dict[str, Any]) -> None:
     LOGGER.info("TEST REPORT")
     LOGGER.info("=" * 50)
 
-    total_tests = 8
+    total_tests = 9
     passed = sum(
         [
             results["connection"],
@@ -361,15 +361,20 @@ def print_report(results: dict[str, Any]) -> None:
 async def main():
     """Main function."""
     parser = argparse.ArgumentParser(description="Test Moonside BLE Protocol")
-    parser.add_argument("--mac", help="MAC address of Moonside device")
+    parser.add_argument(
+        "--identifier",
+        "--mac",
+        dest="identifier",
+        help="BLE device identifier of Moonside device",
+    )
     parser.add_argument("--scan", action="store_true", help="Only scan for devices")
     parser.add_argument("--timeout", type=float, default=10.0, help="Scan timeout")
     args = parser.parse_args()
 
-    tester = MoonsideTester(args.mac) if args.mac else MoonsideTester("")
+    tester = MoonsideTester(args.identifier) if args.identifier else MoonsideTester("")
 
     # Scan mode
-    if args.scan or not args.mac:
+    if args.scan or not args.identifier:
         devices = await tester.discover(timeout=args.timeout)
 
         if not devices:
@@ -384,14 +389,14 @@ async def main():
         if args.scan:
             LOGGER.info(f"\n📝 Found {len(devices)} device(s)")
             LOGGER.info(
-                "Run again with: python test_moonside.py --mac XX:XX:XX:XX:XX:XX"
+                "Run again with: python test_moonside.py --identifier <device-id>"
             )
             return
 
         # Use first device if found
-        args.mac = devices[0][0]
-        tester = MoonsideTester(args.mac)
-        LOGGER.info(f"\n🎯 Auto-selected device: {devices[0][1]} ({args.mac})")
+        args.identifier = devices[0][0]
+        tester = MoonsideTester(args.identifier)
+        LOGGER.info(f"\n🎯 Auto-selected device: {devices[0][1]} ({args.identifier})")
 
     # Run tests
     LOGGER.info("\n🧪 Starting protocol tests...")

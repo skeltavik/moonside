@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta
 
 from bleak import BleakClient, BleakScanner
-from homeassistant.components.bluetooth import async_last_service_info
+from homeassistant.components.bluetooth import (
+    MONOTONIC_TIME,
+    async_ble_device_from_address,
+    async_last_service_info,
+)
 from homeassistant.core import HomeAssistant
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
@@ -23,7 +26,6 @@ from .const import (
     CMD_MODE_PIXEL,
     UART_SERVICE_UUID,
     UART_RX_CHAR_UUID,
-    UART_TX_CHAR_UUID,
     MAX_BRIGHTNESS,
     NUM_PIXELS,
     get_theme_command,
@@ -34,6 +36,8 @@ LOGGER = logging.getLogger(__name__)
 CONNECT_TIMEOUT = 30
 DISCONNECT_TIMEOUT = 5
 COMMAND_TIMEOUT = 10
+ADVERTISEMENT_GRACE_PERIOD = timedelta(minutes=5)
+ADVERTISEMENT_GRACE_PERIOD_SECONDS = ADVERTISEMENT_GRACE_PERIOD.total_seconds()
 
 SERVICE_PULSE = "pulse"
 SERVICE_STROBE = "strobe"
@@ -48,17 +52,20 @@ class MoonsideInstance:
         mac_address: str,
         name: str,
         hass: HomeAssistant | None = None,
+        ble_name: str | None = None,
     ) -> None:
         """Initialize the Moonside instance.
 
         Args:
-            mac_address: BLE MAC address of the device
-            name: Name of the device
+            mac_address: Stored BLE identifier of the device
+            name: Display name of the device
             hass: Home Assistant instance (used for RSSI lookups)
+            ble_name: Bluetooth advertised name used for metadata only
         """
         self._mac = mac_address
         self._name = name
         self._hass = hass
+        self._ble_name = ble_name
         self._client: BleakClient | None = None
         self._connected = False
 
@@ -69,6 +76,7 @@ class MoonsideInstance:
         self._effect: str | None = None
 
         self._rssi: int | None = None
+        self._last_seen_monotonic: float | None = None
         self._last_connected: datetime | None = None
         self._last_update: datetime | None = None
 
@@ -76,8 +84,13 @@ class MoonsideInstance:
 
     @property
     def address(self) -> str:
-        """Return the MAC address."""
+        """Return the stored BLE identifier."""
         return self._mac
+
+    @property
+    def ble_name(self) -> str | None:
+        """Return the Bluetooth advertised name."""
+        return self._ble_name
 
     @property
     def name(self) -> str:
@@ -122,16 +135,48 @@ class MoonsideInstance:
     @property
     def available(self) -> bool:
         """Return True if the device is available."""
-        return self._connected
+        if self._connected:
+            return True
+
+        if self._last_seen_monotonic is None:
+            return False
+
+        return (
+            MONOTONIC_TIME() - self._last_seen_monotonic
+            <= ADVERTISEMENT_GRACE_PERIOD_SECONDS
+        )
 
     @property
     def model(self) -> str:
         """Return the device model based on BLE name."""
-        if self._name and "L1" in self._name.upper():
+        ble_name = self._ble_name.upper() if self._ble_name else ""
+        if "L1" in ble_name or "O101" in ble_name:
             return "Lamp One"
-        elif self._name and "NEON" in self._name.upper():
+        elif "NEON" in ble_name:
             return "Neon"
         return "Lighthouse"
+
+    def _update_advertisement_state(self) -> bool:
+        """Refresh cached Bluetooth advertisement data."""
+        if not self._hass:
+            return False
+
+        for connectable in (True, False):
+            service_info = async_last_service_info(
+                self._hass, self._mac, connectable=connectable
+            )
+            if not service_info:
+                continue
+
+            monotonic_age = MONOTONIC_TIME() - service_info.time
+            if monotonic_age > ADVERTISEMENT_GRACE_PERIOD_SECONDS:
+                continue
+
+            self._rssi = service_info.rssi
+            self._last_seen_monotonic = service_info.time
+            return True
+
+        return False
 
     def _convert_brightness_to_device(self, brightness: int) -> int:
         """Convert Home Assistant brightness (0-255) to device brightness (0-120)."""
@@ -144,19 +189,28 @@ class MoonsideInstance:
     async def _ensure_connected(self) -> bool:
         """Ensure connection to the device."""
         if self._client and self._client.is_connected:
+            self._connected = True
             return True
+
+        self._update_advertisement_state()
 
         try:
             LOGGER.debug("Connecting to %s (%s)", self._name, self._mac)
+            ble_device = None
+            if self._hass:
+                ble_device = async_ble_device_from_address(
+                    self._hass, self._mac, connectable=True
+                )
 
             self._client = await establish_connection(
                 BleakClient,
-                self._mac,
+                ble_device or self._mac,
                 self._name,
                 max_attempts=3,
             )
 
             self._connected = True
+            self._last_connected = datetime.now()
             LOGGER.debug("Connected to %s", self._name)
             return True
 
@@ -183,18 +237,20 @@ class MoonsideInstance:
                 service = self._client.services.get_service(UART_SERVICE_UUID)
                 if not service:
                     LOGGER.error("UART service not found")
+                    self._connected = False
                     return False
 
                 rx_char = service.get_characteristic(UART_RX_CHAR_UUID)
                 if not rx_char:
                     LOGGER.error("UART RX characteristic not found")
+                    self._connected = False
                     return False
 
                 # Encode and send command
                 data = command.encode("utf-8")
                 LOGGER.debug("Sending command: %s", command)
 
-                await self._client.write_gatt_char(rx_char, data, response=False)
+                await self._client.write_gatt_char(rx_char, data, response=True)
 
                 # Small delay to ensure command is processed
                 await asyncio.sleep(0.1)
@@ -320,8 +376,10 @@ class MoonsideInstance:
             True if device is connected and responsive
         """
         async with self._lock:
+            seen_recently = self._update_advertisement_state()
+
             if not await self._ensure_connected():
-                return False
+                return seen_recently
 
             # Try to read the service to verify device is responsive
             try:
@@ -329,24 +387,17 @@ class MoonsideInstance:
                 if not service:
                     LOGGER.debug("UART service not available during update")
                     self._connected = False
-                    return False
+                    return seen_recently
 
                 self._last_update = datetime.now()
-
-                # Update RSSI from latest advertisement data
-                if self._hass:
-                    service_info = async_last_service_info(
-                        self._hass, self._mac, connectable=True
-                    )
-                    if service_info:
-                        self._rssi = service_info.rssi
+                self._last_connected = self._last_update
 
                 return True
 
             except Exception as ex:
                 LOGGER.debug("Error during update: %s", ex)
                 self._connected = False
-                return False
+                return seen_recently
 
     async def pulse(self, duration: float = 0.5) -> bool:
         if not await self._send_command(CMD_LED_ON):
@@ -414,10 +465,7 @@ async def discover_devices(
 
     try:
         LOGGER.debug("Starting Bluetooth scan for Moonside devices...")
-        scanner = BleakScanner(
-            detection_callback=device_found,
-            service_uuids=[UART_SERVICE_UUID],
-        )
+        scanner = BleakScanner(detection_callback=device_found)
         await scanner.start()
         await asyncio.sleep(timeout)
         await scanner.stop()

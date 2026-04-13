@@ -9,17 +9,13 @@ from typing import Any
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
-    SensorEntityDescription,
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import SIGNAL_STRENGTH_DECIBELS_MILLIWATT
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
-
 from .const import DOMAIN
 from .moonside import MoonsideInstance
 
@@ -66,13 +62,13 @@ class MoonsideSensorBase(SensorEntity):
             identifiers={(DOMAIN, self._instance.address)},
             name=self._instance.name,
             manufacturer="Moonside",
-            model="Lighthouse",
+            model=self._instance.model,
         )
 
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return True
+        return self._instance.available
 
 
 class MoonsideRssiSensor(MoonsideSensorBase):
@@ -103,7 +99,7 @@ class MoonsideRssiSensor(MoonsideSensorBase):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
         return {
-            "mac_address": self._instance.address,
+            "device_identifier": self._instance.address,
         }
 
 
@@ -134,7 +130,7 @@ class MoonsideConnectionSensor(MoonsideSensorBase):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
         return {
-            "mac_address": self._instance.address,
+            "device_identifier": self._instance.address,
             "last_connected": self._instance.last_connected.isoformat()
             if self._instance.last_connected
             else None,

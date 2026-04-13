@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -15,13 +16,14 @@ from homeassistant.const import (
     Platform,
 )
 from homeassistant.core import Event, HomeAssistant, ServiceCall
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN, CONF_NAME, DEFAULT_NAME
+from .const import CONF_BLE_NAME, CONF_NAME, DEFAULT_NAME, DOMAIN
 from .moonside import MoonsideInstance
 
 LOGGER = logging.getLogger(__name__)
+
+BLE_NAME_PATTERN = re.compile(r"^MOONSIDE-(?:O\d+|L\d+|NEON.*)$")
 
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,
@@ -77,10 +79,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Moonside from a config entry."""
     mac_address = entry.data[CONF_MAC]
     name = entry.data.get(CONF_NAME, DEFAULT_NAME)
+    ble_name = entry.data.get(CONF_BLE_NAME)
 
     LOGGER.debug("Setting up Moonside device: %s (%s)", name, mac_address)
 
-    instance = MoonsideInstance(mac_address, name, hass)
+    instance = MoonsideInstance(mac_address, name, hass, ble_name=ble_name)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = instance
 
@@ -229,6 +232,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     LOGGER.debug("Moonside device setup complete: %s", name)
+    return True
+
+
+def _is_device_ble_name(value: str | None) -> bool:
+    """Return whether a stored BLE name looks like a real Moonside device name."""
+    return isinstance(value, str) and bool(BLE_NAME_PATTERN.match(value.upper()))
+
+
+def _derive_ble_name(entry: ConfigEntry, data: dict[str, Any]) -> str | None:
+    """Derive a BLE name for legacy entries when possible."""
+    for candidate in (data.get(CONF_BLE_NAME), data.get(CONF_NAME), entry.title):
+        if _is_device_ble_name(candidate):
+            return candidate
+    return None
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate old config entries to the latest version."""
+    if entry.version >= 2:
+        return True
+
+    LOGGER.debug(
+        "Migrating Moonside config entry %s from version %s",
+        entry.entry_id,
+        entry.version,
+    )
+
+    data: dict[str, Any] = dict(entry.data)
+    ble_name = _derive_ble_name(entry, data)
+
+    if ble_name:
+        data[CONF_BLE_NAME] = ble_name
+    else:
+        data.pop(CONF_BLE_NAME, None)
+
+    hass.config_entries.async_update_entry(entry, data=data, version=2)
+
+    LOGGER.debug(
+        "Migration of Moonside config entry %s to version 2 successful", entry.entry_id
+    )
     return True
 
 

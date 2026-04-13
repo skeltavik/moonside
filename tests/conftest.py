@@ -1,10 +1,9 @@
 """Test configuration for Moonside integration."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
-from custom_components.moonside.const import DOMAIN
 
 
 @pytest.fixture
@@ -38,6 +37,8 @@ def mock_moonside_instance():
     instance.brightness = 128
     instance.rgb_color = (255, 0, 0)
     instance.effect = None
+    instance.available = True
+    instance.model = "Lighthouse"
     instance.rssi = -65
     instance.is_connected = True
     instance.last_connected = None

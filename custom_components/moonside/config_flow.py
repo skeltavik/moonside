@@ -16,7 +16,7 @@ from homeassistant.const import CONF_MAC, CONF_NAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import DOMAIN, DEFAULT_NAME
+from .const import CONF_BLE_NAME, DEFAULT_NAME, DOMAIN
 
 LOGGER = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ LOGGER = logging.getLogger(__name__)
 class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Moonside."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -57,14 +57,18 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         discovery_info = self._discovery_info
 
         if user_input is not None:
+            data = {
+                CONF_MAC: discovery_info.address,
+                CONF_NAME: user_input.get(
+                    CONF_NAME, discovery_info.name or DEFAULT_NAME
+                ),
+            }
+            if discovery_info.name:
+                data[CONF_BLE_NAME] = discovery_info.name
+
             return self.async_create_entry(
                 title=discovery_info.name or DEFAULT_NAME,
-                data={
-                    CONF_MAC: discovery_info.address,
-                    CONF_NAME: user_input.get(
-                        CONF_NAME, discovery_info.name or DEFAULT_NAME
-                    ),
-                },
+                data=data,
             )
 
         self._set_confirm_only()
@@ -94,15 +98,18 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
 
             discovery_info = self._discovered_devices[address]
+            data = {
+                CONF_MAC: address,
+                CONF_NAME: user_input.get(
+                    CONF_NAME, discovery_info.name or DEFAULT_NAME
+                ),
+            }
+            if discovery_info.name:
+                data[CONF_BLE_NAME] = discovery_info.name
 
             return self.async_create_entry(
                 title=user_input.get(CONF_NAME, discovery_info.name or DEFAULT_NAME),
-                data={
-                    CONF_MAC: address,
-                    CONF_NAME: user_input.get(
-                        CONF_NAME, discovery_info.name or DEFAULT_NAME
-                    ),
-                },
+                data=data,
             )
 
         current_addresses = self._async_current_ids()
