@@ -40,7 +40,7 @@ Home Assistant custom integration for Moonside smart lights (Lighthouse, Neon, e
 
 1. Go to **Settings** → **Devices & Services** → **Add Integration**
 2. Search for "Moonside"
-3. Select your discovered device or enter the MAC address manually
+3. Select your discovered device or enter the device identifier manually
 4. The light will appear as a new entity
 
 ## Usage
@@ -93,7 +93,7 @@ This integration uses the reverse-engineered BLE protocol for Moonside devices:
 1. Ensure your Moonside light is powered on and in pairing mode (blinking)
 2. Check that your Home Assistant host has a working Bluetooth adapter
 3. Try moving the device closer to your Home Assistant host
-4. Use manual configuration with the MAC address if auto-discovery fails
+4. Use manual configuration with the device identifier if auto-discovery fails
 
 ### Connection Issues
 
