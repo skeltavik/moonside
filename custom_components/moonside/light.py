@@ -139,16 +139,18 @@ class MoonsideLight(RestoreEntity, LightEntity):
             self._instance._power_state_known = False
 
             # Restore brightness
-            if ATTR_BRIGHTNESS in last_state.attributes:
-                self._instance._brightness = last_state.attributes[ATTR_BRIGHTNESS]
+            brightness = last_state.attributes.get(ATTR_BRIGHTNESS)
+            if brightness is not None:
+                self._instance._brightness = brightness
 
             # Restore RGB color
-            if ATTR_RGB_COLOR in last_state.attributes:
-                self._instance._rgb_color = tuple(last_state.attributes[ATTR_RGB_COLOR])
+            rgb_color = last_state.attributes.get(ATTR_RGB_COLOR)
+            if rgb_color is not None:
+                self._instance._rgb_color = tuple(rgb_color)
 
             # Restore effect
-            if ATTR_EFFECT in last_state.attributes:
-                effect_name = last_state.attributes[ATTR_EFFECT]
+            effect_name = last_state.attributes.get(ATTR_EFFECT)
+            if effect_name is not None:
                 self._instance._effect = get_effect_key_from_name(effect_name)
 
     async def async_will_remove_from_hass(self) -> None:

@@ -221,6 +221,17 @@ class MoonsideInstance:
         """Convert device brightness (0-120) to Home Assistant brightness (0-255)."""
         return int((brightness / MAX_BRIGHTNESS) * 255)
 
+    async def _disconnect_client(self) -> None:
+        """Disconnect and clear the cached BLE client."""
+        if self._client and self._client.is_connected:
+            try:
+                await self._client.disconnect()
+            except Exception as ex:
+                LOGGER.debug("Error disconnecting: %s", ex)
+
+        self._connected = False
+        self._client = None
+
     async def _ensure_connected(self) -> bool:
         """Ensure connection to the device."""
         if self._client and self._client.is_connected:
@@ -299,14 +310,14 @@ class MoonsideInstance:
 
             except BLEAK_RETRY_EXCEPTIONS as ex:
                 LOGGER.debug("BLE error sending command: %s", ex)
-                self._connected = False
                 self._notify_state_listeners()
                 return False
             except Exception as ex:
                 LOGGER.error("Error sending command: %s", ex)
-                self._connected = False
                 self._notify_state_listeners()
                 return False
+            finally:
+                await self._disconnect_client()
 
     async def turn_on(self) -> bool:
         """Turn on the light."""
@@ -419,38 +430,15 @@ class MoonsideInstance:
         return await self._send_command(CMD_MODE_PIXEL)
 
     async def update(self) -> bool:
-        """Update device state by attempting connection.
+        """Refresh device availability from Bluetooth advertisements.
 
         Returns:
-            True if device is connected and responsive
+            True if the device is recently reachable over Bluetooth
         """
         async with self._lock:
-            seen_recently = self._update_advertisement_state()
-
-            if not await self._ensure_connected():
-                self._notify_state_listeners()
-                return seen_recently
-
-            # Try to read the service to verify device is responsive
-            try:
-                service = self._client.services.get_service(UART_SERVICE_UUID)
-                if not service:
-                    LOGGER.debug("UART service not available during update")
-                    self._connected = False
-                    self._notify_state_listeners()
-                    return seen_recently
-
-                self._last_update = datetime.now()
-                self._last_connected = self._last_update
-                self._notify_state_listeners()
-
-                return True
-
-            except Exception as ex:
-                LOGGER.debug("Error during update: %s", ex)
-                self._connected = False
-                self._notify_state_listeners()
-                return seen_recently
+            self._update_advertisement_state()
+            self._notify_state_listeners()
+            return self.available
 
     async def pulse(self, duration: float = 0.5) -> bool:
         if not await self._send_command(CMD_LED_ON):
@@ -482,13 +470,7 @@ class MoonsideInstance:
 
     async def stop(self) -> None:
         async with self._lock:
-            if self._client and self._client.is_connected:
-                try:
-                    await self._client.disconnect()
-                except Exception as ex:
-                    LOGGER.debug("Error disconnecting: %s", ex)
-            self._connected = False
-            self._client = None
+            await self._disconnect_client()
 
 
 async def discover_devices(

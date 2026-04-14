@@ -163,13 +163,15 @@ class TestMoonsideInstance:
         """Commands should use write-with-response for Moonside RX characteristic."""
         instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
         instance._lock = asyncio.Lock()
-        instance._client = MagicMock()
-        instance._client.is_connected = True
-        instance._client.write_gatt_char = AsyncMock()
+        client = MagicMock()
+        client.is_connected = True
+        client.write_gatt_char = AsyncMock()
+        client.disconnect = AsyncMock()
         rx_char = MagicMock()
         service = MagicMock()
         service.get_characteristic.return_value = rx_char
-        instance._client.services.get_service.return_value = service
+        client.services.get_service.return_value = service
+        instance._client = client
         listener = MagicMock()
         instance.register_state_listener(listener)
 
@@ -179,22 +181,27 @@ class TestMoonsideInstance:
             result = await instance._send_command("LEDON")
 
         assert result is True
-        instance._client.write_gatt_char.assert_awaited_once_with(
+        client.write_gatt_char.assert_awaited_once_with(
             rx_char,
             b"LEDON",
             response=True,
         )
+        client.disconnect.assert_awaited_once()
         listener.assert_called_once_with()
         assert instance.last_update is not None
+        assert instance.is_connected is False
+        assert instance._client is None
 
     @pytest.mark.asyncio
     async def test_send_command_notifies_listeners_on_failure(self):
         """BLE command failures should still refresh subscribed entities."""
         instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
         instance._lock = asyncio.Lock()
-        instance._client = MagicMock()
-        instance._client.is_connected = True
-        instance._client.services.get_service.return_value = None
+        client = MagicMock()
+        client.is_connected = True
+        client.disconnect = AsyncMock()
+        client.services.get_service.return_value = None
+        instance._client = client
         instance._is_on = True
         instance._power_state_known = True
         instance._last_update = object()
@@ -210,7 +217,9 @@ class TestMoonsideInstance:
         assert instance.is_connected is False
         assert instance.is_on is True
         assert instance.last_update is not None
+        client.disconnect.assert_awaited_once()
         listener.assert_called_once_with()
+        assert instance._client is None
 
     @pytest.mark.asyncio
     async def test_send_command_notifies_listeners_when_reconnect_fails(self):
@@ -332,9 +341,6 @@ class TestMoonsideInstance:
             patch(
                 "custom_components.moonside.moonside.MONOTONIC_TIME", return_value=120
             ),
-            patch.object(
-                instance, "_ensure_connected", new=AsyncMock(return_value=False)
-            ),
         ):
             result = await instance.update()
             assert result is True
@@ -344,8 +350,8 @@ class TestMoonsideInstance:
             assert instance.last_update is not None
 
     @pytest.mark.asyncio
-    async def test_update_notifies_listeners_when_uart_service_is_missing(self):
-        """State listeners should refresh when update detects a disconnected device."""
+    async def test_update_notifies_listeners_during_passive_refresh(self):
+        """State listeners should refresh when advertisement state is refreshed."""
         hass = MagicMock()
         service_info = MagicMock(rssi=-55, time=100)
         listener = MagicMock()
@@ -355,10 +361,6 @@ class TestMoonsideInstance:
         instance._last_update = object()
         instance.register_state_listener(listener)
 
-        client = MagicMock()
-        client.services.get_service.return_value = None
-        instance._client = client
-
         with (
             patch(
                 "custom_components.moonside.moonside.async_last_service_info",
@@ -366,9 +368,6 @@ class TestMoonsideInstance:
             ),
             patch(
                 "custom_components.moonside.moonside.MONOTONIC_TIME", return_value=120
-            ),
-            patch.object(
-                instance, "_ensure_connected", new=AsyncMock(return_value=True)
             ),
         ):
             result = await instance.update()
@@ -388,10 +387,6 @@ class TestMoonsideInstance:
         instance._is_on = True
         instance._power_state_known = True
 
-        client = MagicMock()
-        client.services.get_service.return_value = MagicMock()
-        instance._client = client
-
         with (
             patch(
                 "custom_components.moonside.moonside.async_last_service_info",
@@ -400,15 +395,14 @@ class TestMoonsideInstance:
             patch(
                 "custom_components.moonside.moonside.MONOTONIC_TIME", return_value=120
             ),
-            patch.object(
-                instance, "_ensure_connected", new=AsyncMock(return_value=True)
-            ),
+            patch.object(instance, "_ensure_connected", new=AsyncMock()) as mock_connect,
         ):
             result = await instance.update()
 
         assert result is True
-        assert instance.last_update is not None
+        assert mock_connect.await_count == 0
         assert instance.is_on is True
+        assert instance.last_update is None
 
     def test_update_advertisement_state_does_not_fall_back_to_name(self):
         """Advertisement state should not use BLE name as an identity fallback."""

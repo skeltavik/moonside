@@ -151,6 +151,43 @@ class TestMoonsideLight:
         assert mock_moonside_instance._power_state_known is False
 
     @pytest.mark.asyncio
+    async def test_restored_nullable_attributes_do_not_break_entity_setup(
+        self, mock_moonside_light, mock_moonside_instance
+    ):
+        """Nullable restored attributes should be ignored instead of crashing entity setup."""
+        mock_moonside_instance._brightness = 128
+        mock_moonside_instance._rgb_color = (255, 0, 0)
+        mock_moonside_instance._effect = None
+        restored_state = State(
+            "light.test_moonside",
+            "off",
+            {
+                "brightness": None,
+                "rgb_color": None,
+                "effect": None,
+            },
+        )
+
+        with (
+            patch(
+                "custom_components.moonside.light.RestoreEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                mock_moonside_light,
+                "async_get_last_state",
+                new=AsyncMock(return_value=restored_state),
+            ),
+        ):
+            await mock_moonside_light.async_added_to_hass()
+
+        assert mock_moonside_instance._is_on is False
+        assert mock_moonside_instance._brightness == 128
+        assert mock_moonside_instance._rgb_color == (255, 0, 0)
+        assert mock_moonside_instance._effect is None
+        assert mock_moonside_instance._power_state_known is False
+
+    @pytest.mark.asyncio
     async def test_async_update_refreshes_shared_instance(
         self, mock_moonside_light, mock_moonside_instance
     ):
