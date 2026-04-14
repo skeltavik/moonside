@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -19,6 +20,17 @@ from homeassistant.data_entry_flow import FlowResult
 from .const import CONF_BLE_NAME, DEFAULT_NAME, DOMAIN
 
 LOGGER = logging.getLogger(__name__)
+
+MANUAL_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]*$")
+
+
+def _is_valid_manual_identifier(value: str) -> bool:
+    """Return whether a manually entered BLE identifier looks plausible."""
+    if not isinstance(value, str):
+        return False
+
+    candidate = value.strip()
+    return bool(candidate) and bool(MANUAL_IDENTIFIER_PATTERN.fullmatch(candidate))
 
 
 class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -157,18 +169,21 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            mac_address = user_input[CONF_MAC]
+            mac_address = user_input[CONF_MAC].strip()
 
-            await self.async_set_unique_id(mac_address)
-            self._abort_if_unique_id_configured()
+            if not _is_valid_manual_identifier(mac_address):
+                errors["base"] = "invalid_identifier"
+            else:
+                await self.async_set_unique_id(mac_address)
+                self._abort_if_unique_id_configured()
 
-            return self.async_create_entry(
-                title=user_input.get(CONF_NAME, DEFAULT_NAME),
-                data={
-                    CONF_MAC: mac_address,
-                    CONF_NAME: user_input.get(CONF_NAME, DEFAULT_NAME),
-                },
-            )
+                return self.async_create_entry(
+                    title=user_input.get(CONF_NAME, DEFAULT_NAME),
+                    data={
+                        CONF_MAC: mac_address,
+                        CONF_NAME: user_input.get(CONF_NAME, DEFAULT_NAME),
+                    },
+                )
 
         return self.async_show_form(
             step_id="manual",

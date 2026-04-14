@@ -54,5 +54,8 @@ def mock_moonside_instance():
     instance.strobe = AsyncMock(return_value=True)
     instance.color_cycle = AsyncMock(return_value=True)
     instance.stop = AsyncMock()
+    instance.update = AsyncMock(return_value=True)
+    instance.register_state_listener = MagicMock()
+    instance.unregister_state_listener = MagicMock()
 
     return instance

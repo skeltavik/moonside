@@ -85,6 +85,11 @@ class MoonsideLight(RestoreEntity, LightEntity):
         return self._instance.is_on
 
     @property
+    def assumed_state(self) -> bool:
+        """Return whether the entity state is assumed."""
+        return self._instance.is_on is None
+
+    @property
     def brightness(self) -> int | None:
         """Return the brightness of the light."""
         return self._instance.brightness
@@ -119,6 +124,7 @@ class MoonsideLight(RestoreEntity, LightEntity):
     async def async_added_to_hass(self) -> None:
         """Run when entity is added to Home Assistant."""
         await super().async_added_to_hass()
+        self._instance.register_state_listener(self.async_write_ha_state)
 
         if (last_state := await self.async_get_last_state()) is not None:
             LOGGER.debug(
@@ -130,6 +136,7 @@ class MoonsideLight(RestoreEntity, LightEntity):
                 self._instance._is_on = True
             elif last_state.state == "off":
                 self._instance._is_on = False
+            self._instance._power_state_known = False
 
             # Restore brightness
             if ATTR_BRIGHTNESS in last_state.attributes:
@@ -143,6 +150,11 @@ class MoonsideLight(RestoreEntity, LightEntity):
             if ATTR_EFFECT in last_state.attributes:
                 effect_name = last_state.attributes[ATTR_EFFECT]
                 self._instance._effect = get_effect_key_from_name(effect_name)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Run when entity is removed from Home Assistant."""
+        self._instance.unregister_state_listener(self.async_write_ha_state)
+        await super().async_will_remove_from_hass()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the light."""

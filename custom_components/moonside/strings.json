@@ -28,6 +28,7 @@
       "no_devices_found": "No Moonside devices found"
     },
     "error": {
+      "invalid_identifier": "Enter a valid Bluetooth device identifier",
       "cannot_connect": "Failed to connect",
       "unknown": "Unexpected error"
     }

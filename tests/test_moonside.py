@@ -4,9 +4,23 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voluptuous as vol
 
-from custom_components.moonside import async_migrate_entry
-from custom_components.moonside.config_flow import MoonsideConfigFlow
+from custom_components.moonside import (
+    DOMAIN,
+    SERVICE_COLOR_CYCLE,
+    SERVICE_PULSE,
+    SERVICE_SET_PIXEL,
+    SERVICE_STROBE,
+    _validate_color_cycle_colors,
+    async_migrate_entry,
+    async_setup_entry,
+    async_unload_entry,
+)
+from custom_components.moonside.config_flow import (
+    MoonsideConfigFlow,
+    _is_valid_manual_identifier,
+)
 from custom_components.moonside.const import CONF_BLE_NAME, CONF_MAC, CONF_NAME
 from custom_components.moonside.moonside import MoonsideInstance, discover_devices
 
@@ -42,6 +56,13 @@ class TestMoonsideInstance:
         assert instance._convert_brightness_from_device(0) == 0
         assert instance._convert_brightness_from_device(120) == 255
         assert instance._convert_brightness_from_device(60) == 127
+
+    def test_is_on_is_unknown_when_power_state_is_unverified(self):
+        """Remembered power state should not be exposed as live state until verified."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+        instance._is_on = True
+
+        assert instance.is_on is None
 
     def test_available_when_recently_seen_over_bluetooth(self):
         """Recent Bluetooth advertisements should keep the device available."""
@@ -149,6 +170,8 @@ class TestMoonsideInstance:
         service = MagicMock()
         service.get_characteristic.return_value = rx_char
         instance._client.services.get_service.return_value = service
+        listener = MagicMock()
+        instance.register_state_listener(listener)
 
         with patch.object(
             instance, "_ensure_connected", new=AsyncMock(return_value=True)
@@ -161,6 +184,68 @@ class TestMoonsideInstance:
             b"LEDON",
             response=True,
         )
+        listener.assert_called_once_with()
+        assert instance.last_update is not None
+
+    @pytest.mark.asyncio
+    async def test_send_command_notifies_listeners_on_failure(self):
+        """BLE command failures should still refresh subscribed entities."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+        instance._lock = asyncio.Lock()
+        instance._client = MagicMock()
+        instance._client.is_connected = True
+        instance._client.services.get_service.return_value = None
+        instance._is_on = True
+        instance._last_update = object()
+        listener = MagicMock()
+        instance.register_state_listener(listener)
+
+        with patch.object(
+            instance, "_ensure_connected", new=AsyncMock(return_value=True)
+        ):
+            result = await instance._send_command("LEDON")
+
+        assert result is False
+        assert instance.is_connected is False
+        assert instance.is_on is None
+        assert instance.last_update is None
+        listener.assert_called_once_with()
+
+    @pytest.mark.asyncio
+    async def test_send_command_notifies_listeners_when_reconnect_fails(self):
+        """Reconnect failures should still refresh subscribed entities."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+        instance._lock = asyncio.Lock()
+        instance._is_on = True
+        instance._last_update = object()
+        listener = MagicMock()
+        instance.register_state_listener(listener)
+
+        with patch.object(
+            instance, "_ensure_connected", new=AsyncMock(return_value=False)
+        ):
+            result = await instance._send_command("LEDON")
+
+        assert result is False
+        assert instance.is_on is None
+        assert instance.last_update is None
+        listener.assert_called_once_with()
+
+    def test_state_listener_registration_and_notification(self):
+        """Shared instance should notify registered entity listeners."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+        listener = MagicMock()
+
+        instance.register_state_listener(listener)
+        instance._notify_state_listeners()
+
+        listener.assert_called_once_with()
+
+        instance.unregister_state_listener(listener)
+        listener.reset_mock()
+        instance._notify_state_listeners()
+
+        listener.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_ensure_connected_uses_home_assistant_ble_device(self):
@@ -233,6 +318,8 @@ class TestMoonsideInstance:
         hass = MagicMock()
         service_info = MagicMock(rssi=-55, time=100)
         instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test", hass)
+        instance._is_on = True
+        instance._last_update = object()
 
         with (
             patch(
@@ -250,6 +337,74 @@ class TestMoonsideInstance:
             assert result is True
             assert instance.available is True
             assert instance.rssi == -55
+            assert instance.is_on is None
+            assert instance.last_update is None
+
+    @pytest.mark.asyncio
+    async def test_update_notifies_listeners_when_uart_service_is_missing(self):
+        """State listeners should refresh when update detects a disconnected device."""
+        hass = MagicMock()
+        service_info = MagicMock(rssi=-55, time=100)
+        listener = MagicMock()
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test", hass)
+        instance._is_on = True
+        instance._last_update = object()
+        instance.register_state_listener(listener)
+
+        client = MagicMock()
+        client.services.get_service.return_value = None
+        instance._client = client
+
+        with (
+            patch(
+                "custom_components.moonside.moonside.async_last_service_info",
+                side_effect=[service_info, service_info],
+            ),
+            patch(
+                "custom_components.moonside.moonside.MONOTONIC_TIME", return_value=120
+            ),
+            patch.object(
+                instance, "_ensure_connected", new=AsyncMock(return_value=True)
+            ),
+        ):
+            result = await instance.update()
+
+        assert result is True
+        assert instance.is_connected is False
+        assert instance.is_on is None
+        assert instance.last_update is None
+        listener.assert_called_once_with()
+
+    @pytest.mark.asyncio
+    async def test_update_marks_power_state_unknown_after_successful_poll(self):
+        """Poll success should not preserve an unverified remembered power state."""
+        hass = MagicMock()
+        service_info = MagicMock(rssi=-55, time=100)
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test", hass)
+        instance._is_on = True
+        instance._power_state_known = True
+
+        client = MagicMock()
+        client.services.get_service.return_value = MagicMock()
+        instance._client = client
+
+        with (
+            patch(
+                "custom_components.moonside.moonside.async_last_service_info",
+                side_effect=[service_info, service_info],
+            ),
+            patch(
+                "custom_components.moonside.moonside.MONOTONIC_TIME", return_value=120
+            ),
+            patch.object(
+                instance, "_ensure_connected", new=AsyncMock(return_value=True)
+            ),
+        ):
+            result = await instance.update()
+
+        assert result is True
+        assert instance.last_update is not None
+        assert instance.is_on is None
 
     def test_update_advertisement_state_does_not_fall_back_to_name(self):
         """Advertisement state should not use BLE name as an identity fallback."""
@@ -412,6 +567,78 @@ class TestConfigFlow:
         }
 
     @pytest.mark.asyncio
+    async def test_manual_step_rejects_invalid_identifier(self):
+        """Manual setup should reject obviously invalid identifiers."""
+        flow = MoonsideConfigFlow()
+        flow.async_set_unique_id = AsyncMock()
+        flow._abort_if_unique_id_configured = MagicMock()
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+        result = await flow.async_step_manual(
+            {CONF_MAC: "bad identifier!", CONF_NAME: "Bedroom Lamp"}
+        )
+
+        assert result == {"type": "form"}
+        _, kwargs = flow.async_show_form.call_args
+        assert kwargs["errors"] == {"base": "invalid_identifier"}
+        flow.async_set_unique_id.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_manual_step_accepts_non_mac_ble_identifier(self):
+        """Manual setup should still allow non-MAC BLE identifiers used by this integration."""
+        flow = MoonsideConfigFlow()
+        flow.async_set_unique_id = AsyncMock()
+        flow._abort_if_unique_id_configured = MagicMock()
+        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+
+        await flow.async_step_manual(
+            {CONF_MAC: "UUID-DEVICE-1", CONF_NAME: "Bedroom Lamp"}
+        )
+
+        _, kwargs = flow.async_create_entry.call_args
+        assert kwargs["data"] == {
+            CONF_MAC: "UUID-DEVICE-1",
+            CONF_NAME: "Bedroom Lamp",
+        }
+
+    @pytest.mark.asyncio
+    async def test_user_step_filters_discovery_and_falls_back_to_manual(self):
+        """Only Moonside discoveries should be offered; otherwise the flow should fall back to manual."""
+        flow = MoonsideConfigFlow()
+        flow.hass = MagicMock()
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+        moonside = MagicMock()
+        moonside.address = "UUID-1"
+        moonside.name = "MOONSIDE-O101"
+        other = MagicMock()
+        other.address = "UUID-2"
+        other.name = "Other Device"
+
+        with patch(
+            "custom_components.moonside.config_flow.async_discovered_service_info",
+            return_value=[moonside, other],
+        ):
+            await flow.async_step_user()
+
+        _, kwargs = flow.async_show_form.call_args
+        options = kwargs["data_schema"].schema[vol.Required(CONF_MAC)].container
+        assert options == {"UUID-1": "MOONSIDE-O101"}
+
+        flow = MoonsideConfigFlow()
+        flow.hass = MagicMock()
+        flow.async_step_manual = AsyncMock(return_value={"type": "manual"})
+
+        with patch(
+            "custom_components.moonside.config_flow.async_discovered_service_info",
+            return_value=[other],
+        ):
+            result = await flow.async_step_user()
+
+        assert result == {"type": "manual"}
+        flow.async_step_manual.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_user_step_without_name_does_not_store_ble_name(self):
         """Discovered-device picker should not fabricate a BLE name when absent."""
         flow = MoonsideConfigFlow()
@@ -567,3 +794,105 @@ class TestConfigEntryMigration:
             },
             version=2,
         )
+
+
+class TestIntegrationLifecycle:
+    """Test config-entry lifecycle and service registration."""
+
+    @pytest.mark.asyncio
+    async def test_setup_and_unload_registers_and_removes_services(self):
+        """Setup should register services once; unload should stop the instance and remove services for the last entry."""
+        hass = MagicMock()
+        hass.data = {}
+        hass.config_entries.async_forward_entry_setups = AsyncMock()
+        hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+        hass.bus.async_listen_once = MagicMock(return_value=MagicMock())
+        hass.services.has_service = MagicMock(return_value=False)
+        hass.services.async_register = MagicMock()
+        hass.services.async_remove = MagicMock()
+
+        entry = MagicMock()
+        entry.entry_id = "entry-1"
+        entry.data = {CONF_MAC: "UUID-1", CONF_NAME: "Bedroom Lamp"}
+        entry.add_update_listener = MagicMock(return_value=MagicMock())
+        entry.async_on_unload = MagicMock()
+
+        instance = MagicMock()
+        instance.stop = AsyncMock()
+
+        with patch(
+            "custom_components.moonside.MoonsideInstance", return_value=instance
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        assert hass.data[DOMAIN][entry.entry_id] is instance
+        hass.config_entries.async_forward_entry_setups.assert_awaited_once()
+        assert hass.services.async_register.call_count == 4
+
+        registered_services = [
+            call.args[1] for call in hass.services.async_register.call_args_list
+        ]
+        assert registered_services == [
+            SERVICE_SET_PIXEL,
+            SERVICE_PULSE,
+            SERVICE_STROBE,
+            SERVICE_COLOR_CYCLE,
+        ]
+
+        unload_result = await async_unload_entry(hass, entry)
+
+        assert unload_result is True
+        instance.stop.assert_awaited_once()
+        assert entry.entry_id not in hass.data[DOMAIN]
+        removed_services = [
+            call.args[1] for call in hass.services.async_remove.call_args_list
+        ]
+        assert removed_services == [
+            SERVICE_SET_PIXEL,
+            SERVICE_PULSE,
+            SERVICE_STROBE,
+            SERVICE_COLOR_CYCLE,
+        ]
+
+
+class TestValidationHelpers:
+    """Test service and identifier validators."""
+
+    def test_validate_color_cycle_colors(self):
+        """Color-cycle service input should be parsed into RGB tuples."""
+        assert _validate_color_cycle_colors("[[255,0,0],[0,255,0]]") == [
+            (255, 0, 0),
+            (0, 255, 0),
+        ]
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "not-json",
+            "[]",
+            "{}",
+            "[[255,0]]",
+            '[[255,0,"0"]]',
+            "[[255,0,256]]",
+        ],
+    )
+    def test_validate_color_cycle_colors_rejects_invalid_input(self, value):
+        """Invalid color-cycle payloads should fail before service execution."""
+        with pytest.raises(vol.Invalid):
+            _validate_color_cycle_colors(value)
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("AA:BB:CC:DD:EE:FF", True),
+            ("UUID-DEVICE-1", True),
+            ("  UUID-DEVICE-1  ", True),
+            ("", False),
+            ("   ", False),
+            ("bad identifier!", False),
+        ],
+    )
+    def test_is_valid_manual_identifier(self, value, expected):
+        """Manual identifier validation should reject obvious junk but allow plausible BLE IDs."""
+        assert _is_valid_manual_identifier(value) is expected

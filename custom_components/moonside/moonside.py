@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from typing import Callable
 
 from bleak import BleakClient, BleakScanner
 from homeassistant.components.bluetooth import (
@@ -71,6 +72,7 @@ class MoonsideInstance:
 
         # Device state
         self._is_on: bool | None = None
+        self._power_state_known = False
         self._brightness: int = 255  # 0-255 (mapped to 0-120 for device)
         self._rgb_color: tuple[int, int, int] = (255, 255, 255)
         self._effect: str | None = None
@@ -79,8 +81,22 @@ class MoonsideInstance:
         self._last_seen_monotonic: float | None = None
         self._last_connected: datetime | None = None
         self._last_update: datetime | None = None
+        self._state_listeners: set[Callable[[], None]] = set()
 
         self._lock = asyncio.Lock()
+
+    def register_state_listener(self, listener: Callable[[], None]) -> None:
+        """Register an entity state listener."""
+        self._state_listeners.add(listener)
+
+    def unregister_state_listener(self, listener: Callable[[], None]) -> None:
+        """Unregister an entity state listener."""
+        self._state_listeners.discard(listener)
+
+    def _notify_state_listeners(self) -> None:
+        """Notify subscribed entities that shared state changed."""
+        for listener in tuple(self._state_listeners):
+            listener()
 
     @property
     def address(self) -> str:
@@ -100,6 +116,8 @@ class MoonsideInstance:
     @property
     def is_on(self) -> bool | None:
         """Return True if the light is on."""
+        if not self._power_state_known:
+            return None
         return self._is_on
 
     @property
@@ -217,6 +235,9 @@ class MoonsideInstance:
         except Exception as ex:
             LOGGER.error("Failed to connect to %s: %s", self._name, ex)
             self._connected = False
+            self._is_on = None
+            self._power_state_known = False
+            self._last_update = None
             return False
 
     async def _send_command(self, command: str) -> bool:
@@ -230,6 +251,10 @@ class MoonsideInstance:
         """
         async with self._lock:
             if not await self._ensure_connected():
+                self._is_on = None
+                self._power_state_known = False
+                self._last_update = None
+                self._notify_state_listeners()
                 return False
 
             try:
@@ -238,12 +263,20 @@ class MoonsideInstance:
                 if not service:
                     LOGGER.error("UART service not found")
                     self._connected = False
+                    self._is_on = None
+                    self._power_state_known = False
+                    self._last_update = None
+                    self._notify_state_listeners()
                     return False
 
                 rx_char = service.get_characteristic(UART_RX_CHAR_UUID)
                 if not rx_char:
                     LOGGER.error("UART RX characteristic not found")
                     self._connected = False
+                    self._is_on = None
+                    self._power_state_known = False
+                    self._last_update = None
+                    self._notify_state_listeners()
                     return False
 
                 # Encode and send command
@@ -254,22 +287,34 @@ class MoonsideInstance:
 
                 # Small delay to ensure command is processed
                 await asyncio.sleep(0.1)
+                self._last_update = datetime.now()
+                self._notify_state_listeners()
 
                 return True
 
             except BLEAK_RETRY_EXCEPTIONS as ex:
                 LOGGER.debug("BLE error sending command: %s", ex)
                 self._connected = False
+                self._is_on = None
+                self._power_state_known = False
+                self._last_update = None
+                self._notify_state_listeners()
                 return False
             except Exception as ex:
                 LOGGER.error("Error sending command: %s", ex)
                 self._connected = False
+                self._is_on = None
+                self._power_state_known = False
+                self._last_update = None
+                self._notify_state_listeners()
                 return False
 
     async def turn_on(self) -> bool:
         """Turn on the light."""
         if await self._send_command(CMD_LED_ON):
             self._is_on = True
+            self._power_state_known = True
+            self._notify_state_listeners()
             return True
         return False
 
@@ -277,6 +322,8 @@ class MoonsideInstance:
         """Turn off the light."""
         if await self._send_command(CMD_LED_OFF):
             self._is_on = False
+            self._power_state_known = True
+            self._notify_state_listeners()
             return True
         return False
 
@@ -291,6 +338,7 @@ class MoonsideInstance:
 
         if await self._send_command(command):
             self._brightness = brightness
+            self._notify_state_listeners()
             return True
         return False
 
@@ -314,6 +362,7 @@ class MoonsideInstance:
                 brightness if brightness is not None else self._brightness
             )
             await self.set_brightness(target_brightness)
+            self._notify_state_listeners()
 
             return True
         return False
@@ -331,6 +380,7 @@ class MoonsideInstance:
 
         if await self._send_command(command):
             self._effect = effect_key
+            self._notify_state_listeners()
             return True
         return False
 
@@ -379,6 +429,10 @@ class MoonsideInstance:
             seen_recently = self._update_advertisement_state()
 
             if not await self._ensure_connected():
+                self._is_on = None
+                self._power_state_known = False
+                self._last_update = None
+                self._notify_state_listeners()
                 return seen_recently
 
             # Try to read the service to verify device is responsive
@@ -387,16 +441,26 @@ class MoonsideInstance:
                 if not service:
                     LOGGER.debug("UART service not available during update")
                     self._connected = False
+                    self._is_on = None
+                    self._power_state_known = False
+                    self._last_update = None
+                    self._notify_state_listeners()
                     return seen_recently
 
+                self._power_state_known = False
                 self._last_update = datetime.now()
                 self._last_connected = self._last_update
+                self._notify_state_listeners()
 
                 return True
 
             except Exception as ex:
                 LOGGER.debug("Error during update: %s", ex)
                 self._connected = False
+                self._is_on = None
+                self._power_state_known = False
+                self._last_update = None
+                self._notify_state_listeners()
                 return seen_recently
 
     async def pulse(self, duration: float = 0.5) -> bool:

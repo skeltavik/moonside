@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import json
 from typing import Any
 
 import voluptuous as vol
@@ -67,12 +68,40 @@ STROBE_SCHEMA = vol.Schema(
 COLOR_CYCLE_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_ids,
-        vol.Required("colors"): cv.string,
+        vol.Required("colors"): vol.All(
+            cv.string, lambda value: _validate_color_cycle_colors(value)
+        ),
         vol.Optional("duration", default=2.0): vol.All(
             vol.Coerce(float), vol.Range(min=0.5, max=10.0)
         ),
     }
 )
+
+
+def _validate_color_cycle_colors(value: str) -> list[tuple[int, int, int]]:
+    """Validate and parse color-cycle service input."""
+    try:
+        raw_colors = json.loads(value)
+    except json.JSONDecodeError as err:
+        raise vol.Invalid("colors must be valid JSON") from err
+
+    if not isinstance(raw_colors, list) or not raw_colors:
+        raise vol.Invalid("colors must be a non-empty list of RGB colors")
+
+    parsed_colors: list[tuple[int, int, int]] = []
+    for color in raw_colors:
+        if not isinstance(color, (list, tuple)) or len(color) != 3:
+            raise vol.Invalid("each color must be a 3-item RGB sequence")
+
+        rgb: list[int] = []
+        for channel in color:
+            if not isinstance(channel, int) or not 0 <= channel <= 255:
+                raise vol.Invalid("RGB values must be integers between 0 and 255")
+            rgb.append(channel)
+
+        parsed_colors.append((rgb[0], rgb[1], rgb[2]))
+
+    return parsed_colors
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -193,20 +222,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         async def async_handle_color_cycle(call: ServiceCall) -> None:
             entity_ids = call.data[ATTR_ENTITY_ID]
-            colors_str = call.data["colors"]
+            colors = call.data["colors"]
             duration = call.data["duration"]
-
-            import json
-
-            try:
-                colors = json.loads(colors_str)
-                if not isinstance(colors, list):
-                    LOGGER.error("Colors must be a list of RGB tuples")
-                    return
-                colors = [tuple(c) for c in colors]
-            except json.JSONDecodeError:
-                LOGGER.error("Invalid colors format: %s", colors_str)
-                return
 
             for entry_id, instance in hass.data[DOMAIN].items():
                 from homeassistant.helpers import entity_registry as er

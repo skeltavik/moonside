@@ -45,6 +45,7 @@ class MoonsideSensorBase(SensorEntity):
     """Base class for Moonside sensors."""
 
     _attr_has_entity_name = True
+    _attr_should_poll = False
 
     def __init__(
         self,
@@ -69,6 +70,16 @@ class MoonsideSensorBase(SensorEntity):
     def available(self) -> bool:
         """Return if entity is available."""
         return self._instance.available
+
+    async def async_added_to_hass(self) -> None:
+        """Run when entity is added to Home Assistant."""
+        await super().async_added_to_hass()
+        self._instance.register_state_listener(self.async_write_ha_state)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Run when entity is removed from Home Assistant."""
+        self._instance.unregister_state_listener(self.async_write_ha_state)
+        await super().async_will_remove_from_hass()
 
 
 class MoonsideRssiSensor(MoonsideSensorBase):

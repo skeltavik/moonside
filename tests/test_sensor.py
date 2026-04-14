@@ -1,5 +1,7 @@
 """Tests for Moonside sensor platform."""
 
+from unittest.mock import AsyncMock, patch
+
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import SIGNAL_STRENGTH_DECIBELS_MILLIWATT
 from custom_components.moonside.sensor import (
@@ -87,6 +89,44 @@ class TestMoonsideConnectionSensor:
         )
 
         assert sensor.available is False
+
+    def test_sensors_are_push_updated(self, mock_moonside_instance):
+        """Diagnostic sensors should not poll independently."""
+        sensor = MoonsideConnectionSensor(
+            instance=mock_moonside_instance,
+            entry_id="test_entry_id",
+        )
+
+        assert sensor.should_poll is False
+
+    async def test_sensor_registers_and_unregisters_state_listener(
+        self, mock_moonside_instance
+    ):
+        """Sensors should subscribe to shared instance state updates."""
+        sensor = MoonsideConnectionSensor(
+            instance=mock_moonside_instance,
+            entry_id="test_entry_id",
+        )
+
+        with (
+            patch(
+                "custom_components.moonside.sensor.SensorEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ),
+            patch(
+                "custom_components.moonside.sensor.SensorEntity.async_will_remove_from_hass",
+                new=AsyncMock(),
+            ),
+        ):
+            await sensor.async_added_to_hass()
+            mock_moonside_instance.register_state_listener.assert_called_once_with(
+                sensor.async_write_ha_state
+            )
+
+            await sensor.async_will_remove_from_hass()
+            mock_moonside_instance.unregister_state_listener.assert_called_once_with(
+                sensor.async_write_ha_state
+            )
 
 
 class TestMoonsideLastUpdateSensor:
