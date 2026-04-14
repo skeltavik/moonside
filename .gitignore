@@ -164,3 +164,15 @@ deleted_statistics/
 test_config/
 secrets.yaml
 known_devices.yaml
+
+# APK downloads / reverse-engineering artifacts
+*.apk
+*.xapk
+*.apkm
+*.apks
+*.obb
+apkpure-*.md
+.playwright-mcp/
+
+# Local agent guidance files
+AGENTS.md
