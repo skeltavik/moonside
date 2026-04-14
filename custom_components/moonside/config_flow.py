@@ -18,6 +18,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import CONF_BLE_NAME, DEFAULT_NAME, DOMAIN
+from .moonside import get_display_name_from_ble_name
 
 LOGGER = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def _is_valid_manual_identifier(value: str) -> bool:
 class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Moonside."""
 
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -67,19 +68,18 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         assert self._discovery_info is not None
 
         discovery_info = self._discovery_info
+        default_name = get_display_name_from_ble_name(discovery_info.name)
 
         if user_input is not None:
             data = {
                 CONF_MAC: discovery_info.address,
-                CONF_NAME: user_input.get(
-                    CONF_NAME, discovery_info.name or DEFAULT_NAME
-                ),
+                CONF_NAME: user_input.get(CONF_NAME, default_name),
             }
             if discovery_info.name:
                 data[CONF_BLE_NAME] = discovery_info.name
 
             return self.async_create_entry(
-                title=discovery_info.name or DEFAULT_NAME,
+                title=user_input.get(CONF_NAME, default_name),
                 data=data,
             )
 
@@ -93,9 +93,7 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
             data_schema=vol.Schema(
                 {
-                    vol.Optional(
-                        CONF_NAME, default=discovery_info.name or DEFAULT_NAME
-                    ): str,
+                    vol.Optional(CONF_NAME, default=default_name): str,
                 }
             ),
         )
@@ -110,17 +108,16 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
 
             discovery_info = self._discovered_devices[address]
+            default_name = get_display_name_from_ble_name(discovery_info.name)
             data = {
                 CONF_MAC: address,
-                CONF_NAME: user_input.get(
-                    CONF_NAME, discovery_info.name or DEFAULT_NAME
-                ),
+                CONF_NAME: user_input.get(CONF_NAME, default_name),
             }
             if discovery_info.name:
                 data[CONF_BLE_NAME] = discovery_info.name
 
             return self.async_create_entry(
-                title=user_input.get(CONF_NAME, discovery_info.name or DEFAULT_NAME),
+                title=user_input.get(CONF_NAME, default_name),
                 data=data,
             )
 

@@ -20,11 +20,11 @@ from homeassistant.core import Event, HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
 from .const import CONF_BLE_NAME, CONF_NAME, DEFAULT_NAME, DOMAIN
-from .moonside import MoonsideInstance
+from .moonside import MoonsideInstance, get_display_name_from_ble_name
 
 LOGGER = logging.getLogger(__name__)
 
-BLE_NAME_PATTERN = re.compile(r"^MOONSIDE-(?:O\d+|L\d+|NEON.*)$")
+BLE_NAME_PATTERN = re.compile(r"^MOONSIDE-[A-Z0-9._-]+$")
 
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,
@@ -257,6 +257,15 @@ def _is_device_ble_name(value: str | None) -> bool:
     return isinstance(value, str) and bool(BLE_NAME_PATTERN.match(value.upper()))
 
 
+def _should_replace_display_name(
+    current_name: str | None, ble_name: str | None
+) -> bool:
+    """Return whether a stored display name should be replaced with a friendly one."""
+    return isinstance(current_name, str) and (
+        current_name == ble_name or _is_device_ble_name(current_name)
+    )
+
+
 def _derive_ble_name(entry: ConfigEntry, data: dict[str, Any]) -> str | None:
     """Derive a BLE name for legacy entries when possible."""
     for candidate in (data.get(CONF_BLE_NAME), data.get(CONF_NAME), entry.title):
@@ -267,7 +276,7 @@ def _derive_ble_name(entry: ConfigEntry, data: dict[str, Any]) -> str | None:
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate old config entries to the latest version."""
-    if entry.version >= 2:
+    if entry.version >= 3:
         return True
 
     LOGGER.debug(
@@ -277,17 +286,29 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     data: dict[str, Any] = dict(entry.data)
-    ble_name = _derive_ble_name(entry, data)
+    title = entry.title
 
-    if ble_name:
-        data[CONF_BLE_NAME] = ble_name
-    else:
-        data.pop(CONF_BLE_NAME, None)
+    if entry.version < 2:
+        ble_name = _derive_ble_name(entry, data)
 
-    hass.config_entries.async_update_entry(entry, data=data, version=2)
+        if ble_name:
+            data[CONF_BLE_NAME] = ble_name
+        else:
+            data.pop(CONF_BLE_NAME, None)
+
+    ble_name = data.get(CONF_BLE_NAME)
+    friendly_name = get_display_name_from_ble_name(ble_name)
+
+    if _should_replace_display_name(data.get(CONF_NAME), ble_name):
+        data[CONF_NAME] = friendly_name
+
+    if _should_replace_display_name(title, ble_name):
+        title = friendly_name
+
+    hass.config_entries.async_update_entry(entry, data=data, title=title, version=3)
 
     LOGGER.debug(
-        "Migration of Moonside config entry %s to version 2 successful", entry.entry_id
+        "Migration of Moonside config entry %s to version 3 successful", entry.entry_id
     )
     return True
 

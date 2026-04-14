@@ -458,6 +458,14 @@ class TestMoonsideInstance:
 
         assert instance.model == "Neon Lighthouse"
 
+    def test_model_detects_neon_family_from_ble_name(self):
+        """NEON-named devices should keep the broad Moonside Neon label."""
+        instance = MoonsideInstance(
+            "AA:BB:CC:DD:EE:FF", "Test", ble_name="MOONSIDE-NEON-PLANET"
+        )
+
+        assert instance.model == "Moonside Neon"
+
     def test_update_advertisement_state_ignores_stale_cached_advertisement(self):
         """Stale cached advertisements should not refresh availability."""
         hass = MagicMock()
@@ -550,11 +558,27 @@ class TestConfigFlow:
         await flow.async_step_bluetooth_confirm({CONF_NAME: "Bedroom Lamp"})
 
         _, kwargs = flow.async_create_entry.call_args
+        assert kwargs["title"] == "Bedroom Lamp"
         assert kwargs["data"] == {
             CONF_MAC: "UUID-1",
             CONF_BLE_NAME: "MOONSIDE-O101",
             CONF_NAME: "Bedroom Lamp",
         }
+
+    @pytest.mark.asyncio
+    async def test_bluetooth_confirm_defaults_display_name_from_model(self):
+        """Bluetooth confirmation should default the display name to a friendly model name."""
+        flow = MoonsideConfigFlow()
+        flow._discovery_info = MagicMock(address="UUID-1")
+        flow._discovery_info.name = "MOONSIDE-O101"
+        flow._set_confirm_only = MagicMock()
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+        result = await flow.async_step_bluetooth_confirm()
+
+        assert result == {"type": "form"}
+        _, kwargs = flow.async_show_form.call_args
+        assert kwargs["data_schema"]({}) == {CONF_NAME: "Halo Lamp"}
 
     @pytest.mark.asyncio
     async def test_bluetooth_confirm_without_name_does_not_store_ble_name(self):
@@ -681,6 +705,27 @@ class TestConfigFlow:
             CONF_NAME: "Bedroom Lamp",
         }
 
+    @pytest.mark.asyncio
+    async def test_user_step_defaults_display_name_from_model(self):
+        """Discovered devices should store a friendly display name when no override is supplied."""
+        flow = MoonsideConfigFlow()
+        flow.async_set_unique_id = AsyncMock()
+        flow._abort_if_unique_id_configured = MagicMock()
+        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+        discovery_info = MagicMock(address="UUID-1")
+        discovery_info.name = "MOONSIDE-O101"
+        flow._discovered_devices = {"UUID-1": discovery_info}
+
+        await flow.async_step_user({CONF_MAC: "UUID-1"})
+
+        _, kwargs = flow.async_create_entry.call_args
+        assert kwargs["title"] == "Halo Lamp"
+        assert kwargs["data"] == {
+            CONF_MAC: "UUID-1",
+            CONF_BLE_NAME: "MOONSIDE-O101",
+            CONF_NAME: "Halo Lamp",
+        }
+
 
 class TestConfigEntryMigration:
     """Test config entry migration behavior."""
@@ -709,7 +754,8 @@ class TestConfigEntryMigration:
                 CONF_MAC: "AA:BB:CC:DD:EE:FF",
                 CONF_NAME: "Bedroom Lamp",
             },
-            version=2,
+            title="Bedroom Lamp",
+            version=3,
         )
 
     @pytest.mark.asyncio
@@ -736,7 +782,8 @@ class TestConfigEntryMigration:
                 CONF_NAME: "Bedroom Lamp",
                 CONF_BLE_NAME: "MOONSIDE-O101",
             },
-            version=2,
+            title=entry.title,
+            version=3,
         )
 
     @pytest.mark.asyncio
@@ -760,10 +807,11 @@ class TestConfigEntryMigration:
             entry,
             data={
                 CONF_MAC: "UUID-2",
-                CONF_NAME: "MOONSIDE-L1",
+                CONF_NAME: "Lamp One",
                 CONF_BLE_NAME: "MOONSIDE-L1",
             },
-            version=2,
+            title="Moonside Light",
+            version=3,
         )
 
     @pytest.mark.asyncio
@@ -790,7 +838,8 @@ class TestConfigEntryMigration:
                 CONF_NAME: "Bedroom Lamp",
                 CONF_BLE_NAME: "MOONSIDE-O101",
             },
-            version=2,
+            title="Halo Lamp",
+            version=3,
         )
 
     @pytest.mark.asyncio
@@ -816,7 +865,66 @@ class TestConfigEntryMigration:
                 CONF_MAC: "UUID-5",
                 CONF_NAME: "Bedroom Lamp",
             },
-            version=2,
+            title="Moonside Light",
+            version=3,
+        )
+
+    @pytest.mark.asyncio
+    async def test_migrate_v2_entry_renames_ble_style_name_and_title(self):
+        """Version 2 entries with raw BLE-style names should be renamed to the friendly model."""
+        hass = MagicMock()
+        hass.config_entries.async_update_entry = MagicMock()
+        entry = MagicMock()
+        entry.entry_id = "entry-6"
+        entry.version = 2
+        entry.title = "MOONSIDE-O101"
+        entry.data = {
+            CONF_MAC: "UUID-6",
+            CONF_NAME: "MOONSIDE-O101",
+            CONF_BLE_NAME: "MOONSIDE-O101",
+        }
+
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        hass.config_entries.async_update_entry.assert_called_once_with(
+            entry,
+            data={
+                CONF_MAC: "UUID-6",
+                CONF_NAME: "Halo Lamp",
+                CONF_BLE_NAME: "MOONSIDE-O101",
+            },
+            title="Halo Lamp",
+            version=3,
+        )
+
+    @pytest.mark.asyncio
+    async def test_migrate_v2_entry_keeps_custom_name(self):
+        """Version 2 entries with custom names should preserve them during rename migration."""
+        hass = MagicMock()
+        hass.config_entries.async_update_entry = MagicMock()
+        entry = MagicMock()
+        entry.entry_id = "entry-7"
+        entry.version = 2
+        entry.title = "Bedroom Lamp"
+        entry.data = {
+            CONF_MAC: "UUID-7",
+            CONF_NAME: "Bedroom Lamp",
+            CONF_BLE_NAME: "MOONSIDE-O101",
+        }
+
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        hass.config_entries.async_update_entry.assert_called_once_with(
+            entry,
+            data={
+                CONF_MAC: "UUID-7",
+                CONF_NAME: "Bedroom Lamp",
+                CONF_BLE_NAME: "MOONSIDE-O101",
+            },
+            title="Bedroom Lamp",
+            version=3,
         )
 
 

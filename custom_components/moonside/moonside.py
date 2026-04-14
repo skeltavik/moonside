@@ -45,6 +45,28 @@ SERVICE_STROBE = "strobe"
 SERVICE_COLOR_CYCLE = "color_cycle"
 
 
+def get_display_name_from_ble_name(ble_name: str | None) -> str:
+    """Return a human-readable display name for a BLE-advertised name."""
+    normalized_name = ble_name.upper() if ble_name else ""
+
+    # User-confirmed mapping: MOONSIDE-O101 / HALO names are Halo Lamp devices.
+    if "O101" in normalized_name or "HALO" in normalized_name:
+        return "Halo Lamp"
+    # Issue-tracker-confirmed mapping: users reported model L1 as Lamp One.
+    if "L1" in normalized_name:
+        return "Lamp One"
+    # Public product naming supports "Neon Lighthouse", but BLE-name matching
+    # for this branch is still inferred from the advertised name.
+    if "LIGHTHOUSE" in normalized_name:
+        return "Neon Lighthouse"
+    # Other Neon-family products exist, so this remains a broad best-effort label
+    # rather than a verified single-device mapping.
+    if "NEON" in normalized_name:
+        return "Moonside Neon"
+    # Unknown identifiers stay generic until a concrete product mapping is verified.
+    return "Moonside"
+
+
 class MoonsideInstance:
     """Moonside BLE device instance."""
 
@@ -167,23 +189,7 @@ class MoonsideInstance:
     @property
     def model(self) -> str:
         """Return the device model based on BLE name."""
-        ble_name = self._ble_name.upper() if self._ble_name else ""
-        # User-confirmed mapping: MOONSIDE-O101 / HALO names are Halo Lamp devices.
-        if "O101" in ble_name or "HALO" in ble_name:
-            return "Halo Lamp"
-        # Issue-tracker-confirmed mapping: users reported model L1 as Lamp One.
-        elif "L1" in ble_name:
-            return "Lamp One"
-        # Public product naming supports "Neon Lighthouse", but BLE-name matching
-        # for this branch is still inferred from the advertised name.
-        elif "LIGHTHOUSE" in ble_name:
-            return "Neon Lighthouse"
-        # Other Neon-family products exist, so this remains a broad best-effort label
-        # rather than a verified single-device mapping.
-        elif "NEON" in ble_name:
-            return "Moonside Neon"
-        # Unknown identifiers stay generic until a concrete product mapping is verified.
-        return "Moonside"
+        return get_display_name_from_ble_name(self._ble_name)
 
     def _update_advertisement_state(self) -> bool:
         """Refresh cached Bluetooth advertisement data."""
