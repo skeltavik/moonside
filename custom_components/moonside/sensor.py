@@ -133,7 +133,7 @@ class MoonsideConnectionSensor(MoonsideSensorBase):
     @property
     def native_value(self) -> str:
         """Return the connection status."""
-        if self._instance.is_connected:
+        if self._instance.available:
             return "connected"
         return "disconnected"
 

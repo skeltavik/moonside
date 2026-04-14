@@ -376,8 +376,8 @@ class TestMoonsideInstance:
         listener.assert_called_once_with()
 
     @pytest.mark.asyncio
-    async def test_update_marks_power_state_unknown_after_successful_poll(self):
-        """Poll success should not preserve an unverified remembered power state."""
+    async def test_update_preserves_last_known_power_state_after_successful_poll(self):
+        """Poll success should keep the last known power state when no live readback exists."""
         hass = MagicMock()
         service_info = MagicMock(rssi=-55, time=100)
         instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test", hass)
@@ -404,7 +404,7 @@ class TestMoonsideInstance:
 
         assert result is True
         assert instance.last_update is not None
-        assert instance.is_on is None
+        assert instance.is_on is True
 
     def test_update_advertisement_state_does_not_fall_back_to_name(self):
         """Advertisement state should not use BLE name as an identity fallback."""

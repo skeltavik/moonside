@@ -464,7 +464,6 @@ class MoonsideInstance:
                     self._notify_state_listeners()
                     return seen_recently
 
-                self._power_state_known = False
                 self._last_update = datetime.now()
                 self._last_connected = self._last_update
                 self._notify_state_listeners()

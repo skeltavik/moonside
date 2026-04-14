@@ -61,8 +61,9 @@ class TestMoonsideConnectionSensor:
     """Test connection sensor."""
 
     def test_connection_sensor_connected(self, mock_moonside_instance):
-        """Test connection sensor when connected."""
+        """Test connection sensor when the device is reachable."""
         mock_moonside_instance.is_connected = True
+        mock_moonside_instance.available = True
         sensor = MoonsideConnectionSensor(
             instance=mock_moonside_instance,
             entry_id="test_entry_id",
@@ -71,14 +72,28 @@ class TestMoonsideConnectionSensor:
         assert sensor.native_value == "connected"
 
     def test_connection_sensor_disconnected(self, mock_moonside_instance):
-        """Test connection sensor when disconnected."""
+        """Test connection sensor when the device is unreachable."""
         mock_moonside_instance.is_connected = False
+        mock_moonside_instance.available = False
         sensor = MoonsideConnectionSensor(
             instance=mock_moonside_instance,
             entry_id="test_entry_id",
         )
 
         assert sensor.native_value == "disconnected"
+
+    def test_connection_sensor_reports_connected_when_recently_seen(
+        self, mock_moonside_instance
+    ):
+        """Reachable devices should not show as disconnected just because no active session is open."""
+        mock_moonside_instance.is_connected = False
+        mock_moonside_instance.available = True
+        sensor = MoonsideConnectionSensor(
+            instance=mock_moonside_instance,
+            entry_id="test_entry_id",
+        )
+
+        assert sensor.native_value == "connected"
 
     def test_sensor_availability_follows_instance(self, mock_moonside_instance):
         """Sensor availability should follow the shared instance state."""
