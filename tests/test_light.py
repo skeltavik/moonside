@@ -198,4 +198,12 @@ class TestMoonsideLight:
         assert info["identifiers"] == {(DOMAIN, "AA:BB:CC:DD:EE:FF")}
         assert info["name"] == "Test Moonside"
         assert info["manufacturer"] == "Moonside"
-        assert info["model"] == "Lighthouse"
+        assert info["model"] == "Moonside"
+
+    def test_device_info_uses_halo_model_when_detected(self, mock_moonside_light):
+        """Device info should expose the detected Halo model name."""
+        mock_moonside_light._instance.model = "Halo Lamp"
+
+        info = mock_moonside_light.device_info
+
+        assert info["model"] == "Halo Lamp"

@@ -4,7 +4,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
 
-Home Assistant custom integration for Moonside smart lights (Lighthouse, Neon, etc.) using Bluetooth Low Energy (BLE).
+Home Assistant custom integration for Moonside smart lights (including Halo Lamp and Neon Lighthouse) using Bluetooth Low Energy (BLE).
 
 ## Features
 
@@ -15,8 +15,9 @@ Home Assistant custom integration for Moonside smart lights (Lighthouse, Neon, e
 
 ## Supported Devices
 
-- Moonside Lighthouse
-- Moonside Neon (likely compatible, needs testing)
+- Moonside Halo Lamp
+- Moonside Neon Lighthouse
+- Other Moonside BLE lights using the same UART command set
 - Other Moonside devices using Nordic UART Service over BLE
 
 ## Installation

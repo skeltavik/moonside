@@ -38,7 +38,7 @@ def mock_moonside_instance():
     instance.rgb_color = (255, 0, 0)
     instance.effect = None
     instance.available = True
-    instance.model = "Lighthouse"
+    instance.model = "Moonside"
     instance.rssi = -65
     instance.is_connected = True
     instance.last_connected = None

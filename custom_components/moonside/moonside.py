@@ -168,11 +168,22 @@ class MoonsideInstance:
     def model(self) -> str:
         """Return the device model based on BLE name."""
         ble_name = self._ble_name.upper() if self._ble_name else ""
-        if "L1" in ble_name or "O101" in ble_name:
+        # User-confirmed mapping: MOONSIDE-O101 / HALO names are Halo Lamp devices.
+        if "O101" in ble_name or "HALO" in ble_name:
+            return "Halo Lamp"
+        # Issue-tracker-confirmed mapping: users reported model L1 as Lamp One.
+        elif "L1" in ble_name:
             return "Lamp One"
+        # Public product naming supports "Neon Lighthouse", but BLE-name matching
+        # for this branch is still inferred from the advertised name.
+        elif "LIGHTHOUSE" in ble_name:
+            return "Neon Lighthouse"
+        # Other Neon-family products exist, so this remains a broad best-effort label
+        # rather than a verified single-device mapping.
         elif "NEON" in ble_name:
-            return "Neon"
-        return "Lighthouse"
+            return "Moonside Neon"
+        # Unknown identifiers stay generic until a concrete product mapping is verified.
+        return "Moonside"
 
     def _update_advertisement_state(self) -> bool:
         """Refresh cached Bluetooth advertisement data."""
@@ -385,15 +396,15 @@ class MoonsideInstance:
         return False
 
     async def set_pixel(self, pixel_id: int, brightness: int) -> bool:
-        """Set individual pixel brightness (Lighthouse only).
+        """Set individual pixel brightness (Neon Lighthouse only).
 
         Args:
             pixel_id: Pixel ID (0-89)
             brightness: Brightness value (0-120)
         """
-        if self.model != "Lighthouse":
+        if self.model != "Neon Lighthouse":
             LOGGER.warning(
-                "set_pixel is only supported on Lighthouse devices (device is %s)",
+                "set_pixel is only supported on Neon Lighthouse devices (device is %s)",
                 self.model,
             )
             return False
@@ -410,10 +421,10 @@ class MoonsideInstance:
         return await self._send_command(command)
 
     async def apply_pixels(self) -> bool:
-        """Apply pixel settings (Lighthouse only)."""
-        if self.model != "Lighthouse":
+        """Apply pixel settings (Neon Lighthouse only)."""
+        if self.model != "Neon Lighthouse":
             LOGGER.warning(
-                "apply_pixels is only supported on Lighthouse devices (device is %s)",
+                "apply_pixels is only supported on Neon Lighthouse devices (device is %s)",
                 self.model,
             )
             return False

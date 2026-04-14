@@ -426,13 +426,37 @@ class TestMoonsideInstance:
         assert service_info.name == "MOONSIDE-O101"
         assert instance.rssi is None
 
-    def test_model_detects_lamp_one_from_o101_ble_name(self):
-        """MOONSIDE-O101 devices should be classified as Lamp One."""
+    def test_model_detects_halo_from_o101_ble_name(self):
+        """MOONSIDE-O101 devices should be classified as Halo Lamp."""
         instance = MoonsideInstance(
             "AA:BB:CC:DD:EE:FF", "Test", ble_name="MOONSIDE-O101"
         )
 
+        assert instance.model == "Halo Lamp"
+
+    def test_model_detects_halo_from_ble_name(self):
+        """MOONSIDE Halo devices should be classified as Halo Lamp."""
+        instance = MoonsideInstance(
+            "AA:BB:CC:DD:EE:FF", "Test", ble_name="MOONSIDE-HALO"
+        )
+
+        assert instance.model == "Halo Lamp"
+
+    def test_model_detects_lamp_one_from_l1_ble_name(self):
+        """MOONSIDE-L1 devices should be classified as Lamp One."""
+        instance = MoonsideInstance(
+            "AA:BB:CC:DD:EE:FF", "Test", ble_name="MOONSIDE-L1"
+        )
+
         assert instance.model == "Lamp One"
+
+    def test_model_detects_neon_lighthouse_from_ble_name(self):
+        """LIGHTHOUSE-named devices should be classified as Neon Lighthouse."""
+        instance = MoonsideInstance(
+            "AA:BB:CC:DD:EE:FF", "Test", ble_name="MOONSIDE-LIGHTHOUSE"
+        )
+
+        assert instance.model == "Neon Lighthouse"
 
     def test_update_advertisement_state_ignores_stale_cached_advertisement(self):
         """Stale cached advertisements should not refresh availability."""
