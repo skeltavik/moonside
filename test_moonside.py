@@ -56,6 +56,7 @@ class MoonsideTester:
         self.rx_char: BleakGATTCharacteristic | None = None
         self.tx_char: BleakGATTCharacteristic | None = None
         self.responses: list[bytes] = []
+        self.probe_events: list[tuple[str, bytes]] = []
 
     async def discover(self, timeout: float = 10.0) -> list[tuple[str, str]]:
         """Discover Moonside devices."""
@@ -127,6 +128,89 @@ class MoonsideTester:
         except Exception as e:
             LOGGER.error(f"❌ Connection error: {e}")
             return False
+
+    async def probe_characteristics(self, observe_time: float = 20.0) -> dict[str, Any]:
+        """Enumerate, read, and subscribe to characteristics where possible."""
+        if not self.client or not self.client.is_connected:
+            LOGGER.error("❌ Not connected")
+            return {
+                "services": [],
+                "reads": [],
+                "notifications": [],
+                "errors": ["Not connected"],
+            }
+
+        results: dict[str, Any] = {
+            "services": [],
+            "reads": [],
+            "notifications": [],
+            "errors": [],
+        }
+        subscribed_chars: list[BleakGATTCharacteristic] = []
+
+        def build_handler(char_uuid: str):
+            def handler(_: BleakGATTCharacteristic, data: bytearray) -> None:
+                payload = bytes(data)
+                LOGGER.info(f"🔔 Notification {char_uuid}: {payload!r}")
+                self.probe_events.append((char_uuid, payload))
+
+            return handler
+
+        for service in self.client.services:
+            chars_info = []
+            for char in service.characteristics:
+                properties = sorted(char.properties)
+                chars_info.append({"uuid": char.uuid, "properties": properties})
+            results["services"].append(
+                {"uuid": service.uuid, "characteristics": chars_info}
+            )
+
+        LOGGER.info("\n📋 GATT map")
+        for service in results["services"]:
+            LOGGER.info(f"SERVICE {service['uuid']}")
+            for char in service["characteristics"]:
+                LOGGER.info(f"  CHAR {char['uuid']} props={char['properties']}")
+
+        for service in self.client.services:
+            for char in service.characteristics:
+                properties = set(char.properties)
+                if "read" in properties:
+                    try:
+                        value = bytes(await self.client.read_gatt_char(char))
+                        LOGGER.info(f"📥 Read {char.uuid}: {value!r}")
+                        results["reads"].append({"uuid": char.uuid, "value": value})
+                    except Exception as e:
+                        error = f"Read failed for {char.uuid}: {e}"
+                        LOGGER.warning(f"⚠️ {error}")
+                        results["errors"].append(error)
+
+                if "notify" in properties or "indicate" in properties:
+                    try:
+                        await self.client.start_notify(char, build_handler(char.uuid))
+                        subscribed_chars.append(char)
+                        LOGGER.info(f"🔔 Subscribed to {char.uuid}")
+                        results["notifications"].append(
+                            {"uuid": char.uuid, "status": "subscribed"}
+                        )
+                    except Exception as e:
+                        error = f"Notify failed for {char.uuid}: {e}"
+                        LOGGER.warning(f"⚠️ {error}")
+                        results["errors"].append(error)
+
+        if subscribed_chars:
+            LOGGER.info("\n⏳ Listening for characteristic changes...")
+            LOGGER.info(
+                "   Toggle the lamp in the app or power-cycle it now if you want to trigger state changes."
+            )
+            await asyncio.sleep(observe_time)
+
+        try:
+            for char in reversed(subscribed_chars):
+                await self.client.stop_notify(char)
+        except Exception as e:
+            results["errors"].append(f"Failed to stop notifications cleanly: {e}")
+
+        return results
 
     def _notification_handler(
         self, sender: BleakGATTCharacteristic, data: bytearray
@@ -368,6 +452,17 @@ async def main():
         help="BLE device identifier of Moonside device",
     )
     parser.add_argument("--scan", action="store_true", help="Only scan for devices")
+    parser.add_argument(
+        "--probe",
+        action="store_true",
+        help="Enumerate services, read readable characteristics, and subscribe to notifiable ones",
+    )
+    parser.add_argument(
+        "--observe-time",
+        type=float,
+        default=20.0,
+        help="Seconds to listen for notifications during probe mode",
+    )
     parser.add_argument("--timeout", type=float, default=10.0, help="Scan timeout")
     args = parser.parse_args()
 
@@ -397,6 +492,30 @@ async def main():
         args.identifier = devices[0][0]
         tester = MoonsideTester(args.identifier)
         LOGGER.info(f"\n🎯 Auto-selected device: {devices[0][1]} ({args.identifier})")
+
+    if args.probe:
+        LOGGER.info("\n🧪 Starting BLE probe...")
+        try:
+            if not await tester.connect():
+                sys.exit(1)
+            results = await tester.probe_characteristics(observe_time=args.observe_time)
+            LOGGER.info("\n📊 Probe summary")
+            LOGGER.info(f"  Services: {len(results['services'])}")
+            LOGGER.info(f"  Read successes: {len(results['reads'])}")
+            LOGGER.info(
+                f"  Notification subscriptions: {len(results['notifications'])}"
+            )
+            LOGGER.info(f"  Notification events: {len(tester.probe_events)}")
+            if tester.probe_events:
+                for uuid, payload in tester.probe_events:
+                    LOGGER.info(f"  EVENT {uuid}: {payload!r}")
+            if results["errors"]:
+                LOGGER.info("\n⚠️ Probe errors")
+                for error in results["errors"]:
+                    LOGGER.info(f"  - {error}")
+        finally:
+            await tester.disconnect()
+        return
 
     # Run tests
     LOGGER.info("\n🧪 Starting protocol tests...")

@@ -1,0 +1,45 @@
+{
+  "notes": {
+    "model": "Artifact-grounded mock only",
+    "scope": "semantic emulator, not a wire-protocol emulator",
+    "upstream_payload_type": "decoded_text",
+    "supported_markers": ["A1", "ON", "OFF"],
+    "unknowns": [
+      "exact_ble_request_bytes",
+      "exact_ble_response_bytes",
+      "exact_string_format",
+      "exact_branch_logic_in_updateDeviceInfo",
+      "whether_connectionState_tracks_power_or_only_connectivity"
+    ]
+  },
+  "fixtures": [
+    {
+      "name": "on",
+      "payload": "A1 ... ON ...",
+      "expected_device_info": {
+        "id": "26A3BB99-5EA4-05A2-69D8-42149F79C51D",
+        "connectionState": 1
+      }
+    },
+    {
+      "name": "off",
+      "payload": "A1 ... OFF ...",
+      "expected_device_info": {
+        "id": "26A3BB99-5EA4-05A2-69D8-42149F79C51D",
+        "connectionState": 1
+      }
+    },
+    {
+      "name": "failure",
+      "payload": "A1 ... ERROR ...",
+      "expected_device_info": {
+        "id": "26A3BB99-5EA4-05A2-69D8-42149F79C51D",
+        "connectionState": 0,
+        "failure": {
+          "code": 1,
+          "message": "mock failure"
+        }
+      }
+    }
+  ]
+}
