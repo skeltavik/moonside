@@ -95,15 +95,17 @@ class TestMoonsideConnectionSensor:
 
         assert sensor.native_value == "connected"
 
-    def test_sensor_availability_follows_instance(self, mock_moonside_instance):
-        """Sensor availability should follow the shared instance state."""
+    def test_sensor_availability_stays_visible_when_instance_is_unavailable(
+        self, mock_moonside_instance
+    ):
+        """Diagnostic sensors should stay visible even when the lamp is unreachable."""
         mock_moonside_instance.available = False
         sensor = MoonsideConnectionSensor(
             instance=mock_moonside_instance,
             entry_id="test_entry_id",
         )
 
-        assert sensor.available is False
+        assert sensor.available is True
 
     def test_sensors_are_push_updated(self, mock_moonside_instance):
         """Diagnostic sensors should not poll independently."""

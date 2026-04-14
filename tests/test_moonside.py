@@ -196,6 +196,7 @@ class TestMoonsideInstance:
         instance._client.is_connected = True
         instance._client.services.get_service.return_value = None
         instance._is_on = True
+        instance._power_state_known = True
         instance._last_update = object()
         listener = MagicMock()
         instance.register_state_listener(listener)
@@ -207,8 +208,8 @@ class TestMoonsideInstance:
 
         assert result is False
         assert instance.is_connected is False
-        assert instance.is_on is None
-        assert instance.last_update is None
+        assert instance.is_on is True
+        assert instance.last_update is not None
         listener.assert_called_once_with()
 
     @pytest.mark.asyncio
@@ -217,6 +218,7 @@ class TestMoonsideInstance:
         instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
         instance._lock = asyncio.Lock()
         instance._is_on = True
+        instance._power_state_known = True
         instance._last_update = object()
         listener = MagicMock()
         instance.register_state_listener(listener)
@@ -227,8 +229,8 @@ class TestMoonsideInstance:
             result = await instance._send_command("LEDON")
 
         assert result is False
-        assert instance.is_on is None
-        assert instance.last_update is None
+        assert instance.is_on is True
+        assert instance.last_update is not None
         listener.assert_called_once_with()
 
     def test_state_listener_registration_and_notification(self):
@@ -319,6 +321,7 @@ class TestMoonsideInstance:
         service_info = MagicMock(rssi=-55, time=100)
         instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test", hass)
         instance._is_on = True
+        instance._power_state_known = True
         instance._last_update = object()
 
         with (
@@ -337,8 +340,8 @@ class TestMoonsideInstance:
             assert result is True
             assert instance.available is True
             assert instance.rssi == -55
-            assert instance.is_on is None
-            assert instance.last_update is None
+            assert instance.is_on is True
+            assert instance.last_update is not None
 
     @pytest.mark.asyncio
     async def test_update_notifies_listeners_when_uart_service_is_missing(self):
@@ -348,6 +351,7 @@ class TestMoonsideInstance:
         listener = MagicMock()
         instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test", hass)
         instance._is_on = True
+        instance._power_state_known = True
         instance._last_update = object()
         instance.register_state_listener(listener)
 
@@ -371,8 +375,8 @@ class TestMoonsideInstance:
 
         assert result is True
         assert instance.is_connected is False
-        assert instance.is_on is None
-        assert instance.last_update is None
+        assert instance.is_on is True
+        assert instance.last_update is not None
         listener.assert_called_once_with()
 
     @pytest.mark.asyncio

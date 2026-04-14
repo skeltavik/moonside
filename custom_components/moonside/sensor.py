@@ -68,8 +68,8 @@ class MoonsideSensorBase(SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
-        return self._instance.available
+        """Keep diagnostics visible even when the lamp is unreachable."""
+        return True
 
     async def async_added_to_hass(self) -> None:
         """Run when entity is added to Home Assistant."""

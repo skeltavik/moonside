@@ -252,9 +252,6 @@ class MoonsideInstance:
         except Exception as ex:
             LOGGER.error("Failed to connect to %s: %s", self._name, ex)
             self._connected = False
-            self._is_on = None
-            self._power_state_known = False
-            self._last_update = None
             return False
 
     async def _send_command(self, command: str) -> bool:
@@ -268,9 +265,6 @@ class MoonsideInstance:
         """
         async with self._lock:
             if not await self._ensure_connected():
-                self._is_on = None
-                self._power_state_known = False
-                self._last_update = None
                 self._notify_state_listeners()
                 return False
 
@@ -280,9 +274,6 @@ class MoonsideInstance:
                 if not service:
                     LOGGER.error("UART service not found")
                     self._connected = False
-                    self._is_on = None
-                    self._power_state_known = False
-                    self._last_update = None
                     self._notify_state_listeners()
                     return False
 
@@ -290,9 +281,6 @@ class MoonsideInstance:
                 if not rx_char:
                     LOGGER.error("UART RX characteristic not found")
                     self._connected = False
-                    self._is_on = None
-                    self._power_state_known = False
-                    self._last_update = None
                     self._notify_state_listeners()
                     return False
 
@@ -312,17 +300,11 @@ class MoonsideInstance:
             except BLEAK_RETRY_EXCEPTIONS as ex:
                 LOGGER.debug("BLE error sending command: %s", ex)
                 self._connected = False
-                self._is_on = None
-                self._power_state_known = False
-                self._last_update = None
                 self._notify_state_listeners()
                 return False
             except Exception as ex:
                 LOGGER.error("Error sending command: %s", ex)
                 self._connected = False
-                self._is_on = None
-                self._power_state_known = False
-                self._last_update = None
                 self._notify_state_listeners()
                 return False
 
@@ -446,9 +428,6 @@ class MoonsideInstance:
             seen_recently = self._update_advertisement_state()
 
             if not await self._ensure_connected():
-                self._is_on = None
-                self._power_state_known = False
-                self._last_update = None
                 self._notify_state_listeners()
                 return seen_recently
 
@@ -458,9 +437,6 @@ class MoonsideInstance:
                 if not service:
                     LOGGER.debug("UART service not available during update")
                     self._connected = False
-                    self._is_on = None
-                    self._power_state_known = False
-                    self._last_update = None
                     self._notify_state_listeners()
                     return seen_recently
 
@@ -473,9 +449,6 @@ class MoonsideInstance:
             except Exception as ex:
                 LOGGER.debug("Error during update: %s", ex)
                 self._connected = False
-                self._is_on = None
-                self._power_state_known = False
-                self._last_update = None
                 self._notify_state_listeners()
                 return seen_recently
 
