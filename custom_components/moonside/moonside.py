@@ -17,7 +17,17 @@ from homeassistant.core import HomeAssistant
 from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 from bleak_retry_connector import BLEAK_RETRY_EXCEPTIONS, establish_connection
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .cloud import (
+    MoonsideCloudAuthError,
+    MoonsideCloudClient,
+    MoonsideCloudError,
+    infer_brightness,
+    infer_effect,
+    infer_power_state,
+    infer_rgb_color,
+)
 from .const import (
     CMD_COLOR,
     CMD_LED_OFF,
@@ -25,6 +35,7 @@ from .const import (
     CMD_BRIGHTNESS,
     CMD_PIXEL,
     CMD_MODE_PIXEL,
+    DEFAULT_CLOUD_WRITE_GRACE_SECONDS,
     UART_SERVICE_UUID,
     UART_RX_CHAR_UUID,
     MAX_BRIGHTNESS,
@@ -76,6 +87,10 @@ class MoonsideInstance:
         name: str,
         hass: HomeAssistant | None = None,
         ble_name: str | None = None,
+        cloud_email: str | None = None,
+        cloud_password: str | None = None,
+        cloud_device_id: str | None = None,
+        cloud_write_grace_seconds: int = DEFAULT_CLOUD_WRITE_GRACE_SECONDS,
     ) -> None:
         """Initialize the Moonside instance.
 
@@ -91,6 +106,13 @@ class MoonsideInstance:
         self._ble_name = ble_name
         self._client: BleakClient | None = None
         self._connected = False
+        self._cloud_email = cloud_email.strip() if cloud_email else None
+        self._cloud_password = cloud_password if cloud_password else None
+        self._cloud_device_id = cloud_device_id.strip() if cloud_device_id else None
+        self._cloud_client: MoonsideCloudClient | None = None
+        self._cloud_write_grace_period = timedelta(
+            seconds=max(0, int(cloud_write_grace_seconds))
+        )
 
         # Device state
         self._is_on: bool | None = None
@@ -103,6 +125,7 @@ class MoonsideInstance:
         self._last_seen_monotonic: float | None = None
         self._last_connected: datetime | None = None
         self._last_update: datetime | None = None
+        self._local_write_grace_until: datetime | None = None
         self._state_listeners: set[Callable[[], None]] = set()
 
         self._lock = asyncio.Lock()
@@ -191,6 +214,11 @@ class MoonsideInstance:
         """Return the device model based on BLE name."""
         return get_display_name_from_ble_name(self._ble_name)
 
+    @property
+    def cloud_enabled(self) -> bool:
+        """Return whether cloud-backed state is configured."""
+        return bool(self._cloud_email and self._cloud_password and self._hass)
+
     def _update_advertisement_state(self) -> bool:
         """Refresh cached Bluetooth advertisement data."""
         if not self._hass:
@@ -220,6 +248,103 @@ class MoonsideInstance:
     def _convert_brightness_from_device(self, brightness: int) -> int:
         """Convert device brightness (0-120) to Home Assistant brightness (0-255)."""
         return int((brightness / MAX_BRIGHTNESS) * 255)
+
+    def _mark_local_write_pending(self) -> None:
+        """Delay cloud reconciliation briefly after a successful local write."""
+        self._local_write_grace_until = datetime.now() + self._cloud_write_grace_period
+
+    def _ensure_cloud_client(self) -> MoonsideCloudClient | None:
+        """Create the cloud client lazily when configured."""
+        if not self.cloud_enabled:
+            return None
+
+        if self._cloud_client is None:
+            self._cloud_client = MoonsideCloudClient(
+                async_get_clientsession(self._hass),
+                self._cloud_email,
+                self._cloud_password,
+            )
+
+        return self._cloud_client
+
+    async def _resolve_cloud_device_id(self) -> str | None:
+        """Resolve the Moonside cloud device id for this entry."""
+        if self._cloud_device_id:
+            return self._cloud_device_id
+
+        cloud_client = self._ensure_cloud_client()
+        if cloud_client is None:
+            return None
+
+        devices = await cloud_client.async_fetch_devices()
+        if not devices:
+            return None
+
+        if len(devices) == 1:
+            self._cloud_device_id = next(iter(devices))
+            return self._cloud_device_id
+
+        preferred_names = {
+            value.strip().casefold()
+            for value in (self._name, self._ble_name, self.model)
+            if isinstance(value, str) and value.strip()
+        }
+
+        matches = [
+            device_id
+            for device_id, state in devices.items()
+            if str(state.get("deviceName", "")).strip().casefold() in preferred_names
+            or str(state.get("deviceModel", "")).strip().casefold() in preferred_names
+            or str(state.get("subModel", "")).strip().casefold() in preferred_names
+        ]
+
+        if len(matches) == 1:
+            self._cloud_device_id = matches[0]
+            return self._cloud_device_id
+
+        return None
+
+    def apply_cloud_state(self, device_state: dict[str, object]) -> None:
+        """Apply normalized cloud state into the shared instance cache."""
+        if (
+            self._local_write_grace_until is not None
+            and datetime.now() < self._local_write_grace_until
+        ):
+            self._last_update = datetime.now()
+            return
+
+        inferred_power = infer_power_state(device_state)
+        if inferred_power is not None:
+            self._is_on = inferred_power
+            self._power_state_known = True
+
+        if (brightness := infer_brightness(device_state)) is not None:
+            self._brightness = brightness
+
+        if (rgb_color := infer_rgb_color(device_state)) is not None:
+            self._rgb_color = rgb_color
+
+        inferred_effect = infer_effect(device_state)
+        if inferred_effect is not None:
+            self._effect = inferred_effect
+        elif str(device_state.get("controlData", "")).upper().startswith("COLOR"):
+            self._effect = None
+
+        self._last_update = datetime.now()
+
+    async def _refresh_cloud_state(self) -> None:
+        """Refresh authoritative state from the Moonside cloud when configured."""
+        cloud_client = self._ensure_cloud_client()
+        if cloud_client is None:
+            return
+
+        device_id = await self._resolve_cloud_device_id()
+        if not device_id:
+            LOGGER.debug("Unable to resolve Moonside cloud device for %s", self._name)
+            return
+
+        state = await cloud_client.async_get_device_state(device_id)
+        self.apply_cloud_state(state)
 
     async def _disconnect_client(self) -> None:
         """Disconnect and clear the cached BLE client."""
@@ -324,6 +449,7 @@ class MoonsideInstance:
         if await self._send_command(CMD_LED_ON):
             self._is_on = True
             self._power_state_known = True
+            self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
         return False
@@ -333,6 +459,7 @@ class MoonsideInstance:
         if await self._send_command(CMD_LED_OFF):
             self._is_on = False
             self._power_state_known = True
+            self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
         return False
@@ -348,6 +475,7 @@ class MoonsideInstance:
 
         if await self._send_command(command):
             self._brightness = brightness
+            self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
         return False
@@ -367,6 +495,7 @@ class MoonsideInstance:
         if await self._send_command(command):
             self._rgb_color = rgb_color
             self._effect = None
+            self._mark_local_write_pending()
 
             target_brightness = (
                 brightness if brightness is not None else self._brightness
@@ -390,6 +519,7 @@ class MoonsideInstance:
 
         if await self._send_command(command):
             self._effect = effect_key
+            self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
         return False
@@ -437,6 +567,14 @@ class MoonsideInstance:
         """
         async with self._lock:
             self._update_advertisement_state()
+            try:
+                await self._refresh_cloud_state()
+            except MoonsideCloudAuthError as ex:
+                LOGGER.warning(
+                    "Moonside cloud authentication failed for %s: %s", self._name, ex
+                )
+            except MoonsideCloudError as ex:
+                LOGGER.debug("Moonside cloud refresh failed for %s: %s", self._name, ex)
             self._notify_state_listeners()
             return self.available
 

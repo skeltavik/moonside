@@ -15,10 +15,23 @@ UART_TX_CHAR_UUID: Final = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
 CONF_MAC: Final = "mac"
 CONF_NAME: Final = "name"
 CONF_BLE_NAME: Final = "ble_name"
+CONF_CLOUD_EMAIL: Final = "cloud_email"
+CONF_CLOUD_PASSWORD: Final = "cloud_password"
+CONF_CLOUD_DEVICE_ID: Final = "cloud_device_id"
+CONF_CLOUD_WRITE_GRACE_SECONDS: Final = "cloud_write_grace_seconds"
 
 # Default values
 DEFAULT_NAME: Final = "Moonside Light"
 DEFAULT_BRIGHTNESS: Final = 255
+DEFAULT_CLOUD_WRITE_GRACE_SECONDS: Final = 10
+
+# Moonside cloud API
+FIREBASE_API_KEY: Final = "AIzaSyCC-qQZqcZhxqsbO7GB0nXZShab9gV06Bk"
+FIREBASE_IDENTITY_URL: Final = (
+    "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword"
+)
+FIREBASE_TOKEN_REFRESH_URL: Final = "https://securetoken.googleapis.com/v1/token"
+REALTIME_DATABASE_URL: Final = "https://moonside-501a1.firebaseio.com"
 
 # Moonside protocol constants
 MAX_BRIGHTNESS: Final = 120  # Moonside max brightness is 120
@@ -167,5 +180,13 @@ def get_effect_key_from_name(effect_name: str) -> str:
     """Find effect key from display name."""
     for key, (name, _, _) in THEMES.items():
         if name == effect_name:
+            return key
+    return None
+
+
+def get_effect_key_from_command(command: str) -> str | None:
+    """Find effect key from a full THEME command string."""
+    for key in THEMES:
+        if get_theme_command(key) == command:
             return key
     return None

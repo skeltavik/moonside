@@ -1,6 +1,7 @@
 """Tests for Moonside BLE communication."""
 
 import asyncio
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,9 +20,19 @@ from custom_components.moonside import (
 )
 from custom_components.moonside.config_flow import (
     MoonsideConfigFlow,
+    MoonsideOptionsFlowHandler,
     _is_valid_manual_identifier,
 )
-from custom_components.moonside.const import CONF_BLE_NAME, CONF_MAC, CONF_NAME
+from custom_components.moonside.const import (
+    CONF_BLE_NAME,
+    CONF_CLOUD_DEVICE_ID,
+    CONF_CLOUD_EMAIL,
+    CONF_CLOUD_PASSWORD,
+    CONF_CLOUD_WRITE_GRACE_SECONDS,
+    CONF_MAC,
+    CONF_NAME,
+    DEFAULT_CLOUD_WRITE_GRACE_SECONDS,
+)
 from custom_components.moonside.moonside import MoonsideInstance, discover_devices
 
 
@@ -42,6 +53,24 @@ class TestMoonsideInstance:
         assert instance.rgb_color == (255, 255, 255)
         assert instance.rssi is None
         assert instance.is_connected is False
+
+    def test_initialization_uses_default_cloud_write_grace_period(self):
+        """Instances should default to the documented cloud write grace period."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test Lamp")
+
+        assert instance._cloud_write_grace_period == timedelta(
+            seconds=DEFAULT_CLOUD_WRITE_GRACE_SECONDS
+        )
+
+    def test_initialization_accepts_custom_cloud_write_grace_period(self):
+        """Instances should respect a configured cloud write grace period."""
+        instance = MoonsideInstance(
+            "AA:BB:CC:DD:EE:FF",
+            "Test Lamp",
+            cloud_write_grace_seconds=25,
+        )
+
+        assert instance._cloud_write_grace_period == timedelta(seconds=25)
 
     def test_brightness_conversion(self):
         """Test brightness conversion."""
@@ -395,7 +424,9 @@ class TestMoonsideInstance:
             patch(
                 "custom_components.moonside.moonside.MONOTONIC_TIME", return_value=120
             ),
-            patch.object(instance, "_ensure_connected", new=AsyncMock()) as mock_connect,
+            patch.object(
+                instance, "_ensure_connected", new=AsyncMock()
+            ) as mock_connect,
         ):
             result = await instance.update()
 
@@ -403,6 +434,132 @@ class TestMoonsideInstance:
         assert mock_connect.await_count == 0
         assert instance.is_on is True
         assert instance.last_update is None
+
+    def test_apply_cloud_state_uses_authoritative_power_and_color_data(self):
+        """Cloud state should replace optimistic local state when available."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+
+        instance.apply_cloud_state(
+            {
+                "controlData": "COLOR255000128",
+                "brightness": 75,
+            }
+        )
+
+        assert instance.is_on is True
+        assert instance.rgb_color == (255, 0, 128)
+        assert instance.brightness == 191
+        assert instance.effect is None
+
+    def test_apply_cloud_state_ignores_stale_cloud_during_local_write_grace_window(
+        self,
+    ):
+        """Fresh local BLE writes should not be rolled back by stale cloud state."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+        instance._is_on = True
+        instance._power_state_known = True
+        instance._brightness = 255
+        instance._rgb_color = (255, 255, 255)
+        instance._local_write_grace_until = datetime.now() + timedelta(seconds=5)
+
+        instance.apply_cloud_state(
+            {
+                "controlData": "LEDOFF",
+                "brightness": 10,
+                "colorHEXDecimal": 0,
+            }
+        )
+
+        assert instance.is_on is True
+        assert instance.brightness == 255
+        assert instance.rgb_color == (255, 255, 255)
+
+    def test_apply_cloud_state_accepts_cloud_after_local_write_grace_expires(self):
+        """Cloud state should resume as the source of truth after the grace window."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+        instance._is_on = True
+        instance._power_state_known = True
+        instance._brightness = 255
+        instance._local_write_grace_until = datetime.now() - timedelta(seconds=1)
+
+        instance.apply_cloud_state(
+            {
+                "controlData": "LEDOFF",
+                "brightness": 10,
+            }
+        )
+
+        assert instance.is_on is False
+        assert instance.brightness == 26
+
+    def test_apply_cloud_state_is_not_suppressed_when_grace_window_is_disabled(self):
+        """A zero-second grace window should allow immediate cloud reconciliation."""
+        instance = MoonsideInstance(
+            "AA:BB:CC:DD:EE:FF",
+            "Test",
+            cloud_write_grace_seconds=0,
+        )
+        instance._is_on = True
+        instance._power_state_known = True
+        instance._mark_local_write_pending()
+
+        instance.apply_cloud_state({"controlData": "LEDOFF"})
+
+        assert instance.is_on is False
+
+    @pytest.mark.asyncio
+    async def test_update_reads_cloud_state_when_configured(self):
+        """Configured cloud state should be fetched during passive updates."""
+        hass = MagicMock()
+        instance = MoonsideInstance(
+            "AA:BB:CC:DD:EE:FF",
+            "Lamp One",
+            hass,
+            ble_name="MOONSIDE-L1",
+            cloud_email="user@example.com",
+            cloud_password="secret",
+            cloud_device_id="device-1",
+        )
+        instance._cloud_client = MagicMock()
+        instance._cloud_client.async_get_device_state = AsyncMock(
+            return_value={"controlData": "LEDOFF", "brightness": 40}
+        )
+
+        with patch.object(instance, "_update_advertisement_state", return_value=False):
+            result = await instance.update()
+
+        assert result is False
+        assert instance.is_on is False
+        assert instance.brightness == 102
+        instance._cloud_client.async_get_device_state.assert_awaited_once_with(
+            "device-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_update_resolves_single_cloud_device_automatically(self):
+        """Single-device cloud accounts should auto-bind without a manual device id."""
+        hass = MagicMock()
+        instance = MoonsideInstance(
+            "AA:BB:CC:DD:EE:FF",
+            "Lamp One",
+            hass,
+            ble_name="MOONSIDE-L1",
+            cloud_email="user@example.com",
+            cloud_password="secret",
+        )
+        instance._cloud_client = MagicMock()
+        instance._cloud_client.async_fetch_devices = AsyncMock(
+            return_value={"device-1": {"deviceName": "Lamp One"}}
+        )
+        instance._cloud_client.async_get_device_state = AsyncMock(
+            return_value={"controlData": "LEDON"}
+        )
+
+        with patch.object(instance, "_update_advertisement_state", return_value=False):
+            await instance.update()
+
+        assert instance._cloud_device_id == "device-1"
+        assert instance.is_on is True
 
     def test_update_advertisement_state_does_not_fall_back_to_name(self):
         """Advertisement state should not use BLE name as an identity fallback."""
@@ -442,9 +599,7 @@ class TestMoonsideInstance:
 
     def test_model_detects_lamp_one_from_l1_ble_name(self):
         """MOONSIDE-L1 devices should be classified as Lamp One."""
-        instance = MoonsideInstance(
-            "AA:BB:CC:DD:EE:FF", "Test", ble_name="MOONSIDE-L1"
-        )
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test", ble_name="MOONSIDE-L1")
 
         assert instance.model == "Lamp One"
 
@@ -984,6 +1139,107 @@ class TestIntegrationLifecycle:
             SERVICE_STROBE,
             SERVICE_COLOR_CYCLE,
         ]
+
+    @pytest.mark.asyncio
+    async def test_setup_entry_passes_cloud_options_to_instance(self):
+        """Configured cloud options should be wired into the BLE instance."""
+        hass = MagicMock()
+        hass.data = {}
+        hass.config_entries.async_forward_entry_setups = AsyncMock()
+        hass.bus.async_listen_once = MagicMock(return_value=MagicMock())
+        hass.services.has_service = MagicMock(return_value=True)
+
+        entry = MagicMock()
+        entry.entry_id = "entry-1"
+        entry.data = {CONF_MAC: "UUID-1", CONF_NAME: "Bedroom Lamp"}
+        entry.options = {
+            CONF_CLOUD_EMAIL: "user@example.com",
+            CONF_CLOUD_PASSWORD: "secret",
+            CONF_CLOUD_DEVICE_ID: "device-1",
+            CONF_CLOUD_WRITE_GRACE_SECONDS: 25,
+        }
+        entry.add_update_listener = MagicMock(return_value=MagicMock())
+        entry.async_on_unload = MagicMock()
+
+        instance = MagicMock()
+        with patch(
+            "custom_components.moonside.MoonsideInstance", return_value=instance
+        ) as mock_instance:
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        _, kwargs = mock_instance.call_args
+        assert kwargs["cloud_email"] == "user@example.com"
+        assert kwargs["cloud_password"] == "secret"
+        assert kwargs["cloud_device_id"] == "device-1"
+        assert kwargs["cloud_write_grace_seconds"] == 25
+
+
+class TestOptionsFlow:
+    """Test options flow behavior."""
+
+    @pytest.mark.asyncio
+    async def test_options_flow_saves_cloud_settings(self):
+        """Options flow should persist cloud credentials and an optional device id."""
+        entry = MagicMock()
+        entry.options = {}
+        flow = MoonsideOptionsFlowHandler(entry)
+        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+
+        result = await flow.async_step_init(
+            {
+                CONF_CLOUD_EMAIL: "user@example.com",
+                CONF_CLOUD_PASSWORD: "secret",
+                CONF_CLOUD_DEVICE_ID: "device-1",
+                CONF_CLOUD_WRITE_GRACE_SECONDS: 25,
+            }
+        )
+
+        assert result == {"type": "create_entry"}
+        _, kwargs = flow.async_create_entry.call_args
+        assert kwargs["data"] == {
+            CONF_CLOUD_EMAIL: "user@example.com",
+            CONF_CLOUD_PASSWORD: "secret",
+            CONF_CLOUD_DEVICE_ID: "device-1",
+            CONF_CLOUD_WRITE_GRACE_SECONDS: 25,
+        }
+
+    @pytest.mark.asyncio
+    async def test_options_flow_defaults_grace_seconds_when_showing_form(self):
+        """Options form should expose the current grace-window value."""
+        entry = MagicMock()
+        entry.options = {CONF_CLOUD_WRITE_GRACE_SECONDS: 25}
+        flow = MoonsideOptionsFlowHandler(entry)
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+        result = await flow.async_step_init()
+
+        assert result == {"type": "form"}
+        _, kwargs = flow.async_show_form.call_args
+        schema = kwargs["data_schema"]
+        assert schema({})[CONF_CLOUD_WRITE_GRACE_SECONDS] == 25
+
+    @pytest.mark.asyncio
+    async def test_options_flow_clears_cloud_settings_when_credentials_are_blank(self):
+        """Blank cloud credentials should disable cloud-backed state."""
+        entry = MagicMock()
+        entry.options = {
+            CONF_CLOUD_EMAIL: "user@example.com",
+            CONF_CLOUD_PASSWORD: "secret",
+        }
+        flow = MoonsideOptionsFlowHandler(entry)
+        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+
+        await flow.async_step_init(
+            {
+                CONF_CLOUD_EMAIL: "",
+                CONF_CLOUD_PASSWORD: "",
+                CONF_CLOUD_DEVICE_ID: "",
+            }
+        )
+
+        _, kwargs = flow.async_create_entry.call_args
+        assert kwargs["data"] == {}
 
 
 class TestValidationHelpers:
