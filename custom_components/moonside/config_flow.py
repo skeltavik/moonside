@@ -17,7 +17,16 @@ from homeassistant.const import CONF_MAC, CONF_NAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import CONF_BLE_NAME, DEFAULT_NAME, DOMAIN
+from .const import (
+    CONF_BLE_NAME,
+    CONF_CLOUD_DEVICE_ID,
+    CONF_CLOUD_EMAIL,
+    CONF_CLOUD_PASSWORD,
+    CONF_CLOUD_WRITE_GRACE_SECONDS,
+    DEFAULT_CLOUD_WRITE_GRACE_SECONDS,
+    DEFAULT_NAME,
+    DOMAIN,
+)
 from .moonside import get_display_name_from_ble_name
 
 LOGGER = logging.getLogger(__name__)
@@ -207,16 +216,44 @@ class MoonsideOptionsFlowHandler(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        self._config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
         if user_input is not None:
+            if not user_input.get(CONF_CLOUD_EMAIL) or not user_input.get(
+                CONF_CLOUD_PASSWORD
+            ):
+                user_input = {}
             return self.async_create_entry(title="", data=user_input)
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_CLOUD_EMAIL,
+                        default=self._config_entry.options.get(CONF_CLOUD_EMAIL, ""),
+                    ): str,
+                    vol.Optional(
+                        CONF_CLOUD_PASSWORD,
+                        default=self._config_entry.options.get(CONF_CLOUD_PASSWORD, ""),
+                    ): str,
+                    vol.Optional(
+                        CONF_CLOUD_DEVICE_ID,
+                        default=self._config_entry.options.get(
+                            CONF_CLOUD_DEVICE_ID, ""
+                        ),
+                    ): str,
+                    vol.Optional(
+                        CONF_CLOUD_WRITE_GRACE_SECONDS,
+                        default=self._config_entry.options.get(
+                            CONF_CLOUD_WRITE_GRACE_SECONDS,
+                            DEFAULT_CLOUD_WRITE_GRACE_SECONDS,
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=0, max=300)),
+                }
+            ),
         )

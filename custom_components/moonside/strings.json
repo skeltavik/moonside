@@ -32,5 +32,19 @@
       "cannot_connect": "Failed to connect",
       "unknown": "Unexpected error"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Moonside cloud state",
+        "description": "Optionally configure Moonside cloud credentials so Home Assistant can read authoritative device state while continuing to control the lamp locally over Bluetooth.",
+        "data": {
+          "cloud_email": "Cloud email",
+          "cloud_password": "Cloud password",
+          "cloud_device_id": "Cloud device ID",
+          "cloud_write_grace_seconds": "Cloud write grace seconds"
+        }
+      }
+    }
   }
 }

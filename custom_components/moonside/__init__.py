@@ -19,7 +19,17 @@ from homeassistant.const import (
 from homeassistant.core import Event, HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
-from .const import CONF_BLE_NAME, CONF_NAME, DEFAULT_NAME, DOMAIN
+from .const import (
+    CONF_BLE_NAME,
+    CONF_CLOUD_DEVICE_ID,
+    CONF_CLOUD_EMAIL,
+    CONF_CLOUD_PASSWORD,
+    CONF_CLOUD_WRITE_GRACE_SECONDS,
+    CONF_NAME,
+    DEFAULT_CLOUD_WRITE_GRACE_SECONDS,
+    DEFAULT_NAME,
+    DOMAIN,
+)
 from .moonside import MoonsideInstance, get_display_name_from_ble_name
 
 LOGGER = logging.getLogger(__name__)
@@ -109,10 +119,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     mac_address = entry.data[CONF_MAC]
     name = entry.data.get(CONF_NAME, DEFAULT_NAME)
     ble_name = entry.data.get(CONF_BLE_NAME)
+    cloud_email = entry.options.get(CONF_CLOUD_EMAIL)
+    cloud_password = entry.options.get(CONF_CLOUD_PASSWORD)
+    cloud_device_id = entry.options.get(CONF_CLOUD_DEVICE_ID)
+    cloud_write_grace_seconds = entry.options.get(
+        CONF_CLOUD_WRITE_GRACE_SECONDS,
+        DEFAULT_CLOUD_WRITE_GRACE_SECONDS,
+    )
 
     LOGGER.debug("Setting up Moonside device: %s (%s)", name, mac_address)
 
-    instance = MoonsideInstance(mac_address, name, hass, ble_name=ble_name)
+    instance = MoonsideInstance(
+        mac_address,
+        name,
+        hass,
+        ble_name=ble_name,
+        cloud_email=cloud_email,
+        cloud_password=cloud_password,
+        cloud_device_id=cloud_device_id,
+        cloud_write_grace_seconds=cloud_write_grace_seconds,
+    )
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = instance
 
