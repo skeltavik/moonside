@@ -448,6 +448,7 @@ class TestMoonsideInstance:
         )
 
         assert instance.is_on is True
+        assert instance.power_state_source == "cloud"
         assert instance.rgb_color == (255, 0, 128)
         assert instance.brightness == 191
         assert instance.effect is None
@@ -561,6 +562,33 @@ class TestMoonsideInstance:
 
         assert instance._cloud_device_id == "device-1"
         assert instance.is_on is True
+        assert instance.power_state_source == "cloud"
+
+    @pytest.mark.asyncio
+    async def test_turn_on_marks_power_state_as_local(self):
+        """Successful local power writes should mark the power state as local."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+
+        with patch.object(instance, "_send_command", new=AsyncMock(return_value=True)):
+            result = await instance.turn_on()
+
+        assert result is True
+        assert instance.is_on is True
+        assert instance.power_state_source == "local"
+
+    @pytest.mark.asyncio
+    async def test_turn_off_marks_power_state_as_local(self):
+        """Successful local off writes should mark the power state as local."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+        instance._is_on = True
+        instance._power_state_known = True
+
+        with patch.object(instance, "_send_command", new=AsyncMock(return_value=True)):
+            result = await instance.turn_off()
+
+        assert result is True
+        assert instance.is_on is False
+        assert instance.power_state_source == "local"
 
     def test_update_advertisement_state_does_not_fall_back_to_name(self):
         """Advertisement state should not use BLE name as an identity fallback."""

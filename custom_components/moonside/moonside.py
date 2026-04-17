@@ -117,6 +117,7 @@ class MoonsideInstance:
         # Device state
         self._is_on: bool | None = None
         self._power_state_known = False
+        self._power_state_source = "unknown"
         self._brightness: int = 255  # 0-255 (mapped to 0-120 for device)
         self._rgb_color: tuple[int, int, int] = (255, 255, 255)
         self._effect: str | None = None
@@ -169,6 +170,11 @@ class MoonsideInstance:
     def brightness(self) -> int:
         """Return current brightness (0-255)."""
         return self._brightness
+
+    @property
+    def power_state_source(self) -> str:
+        """Return the source for the current power-state view."""
+        return self._power_state_source
 
     @property
     def rgb_color(self) -> tuple[int, int, int]:
@@ -317,6 +323,7 @@ class MoonsideInstance:
         if inferred_power is not None:
             self._is_on = inferred_power
             self._power_state_known = True
+            self._power_state_source = "cloud"
 
         if (brightness := infer_brightness(device_state)) is not None:
             self._brightness = brightness
@@ -449,6 +456,7 @@ class MoonsideInstance:
         if await self._send_command(CMD_LED_ON):
             self._is_on = True
             self._power_state_known = True
+            self._power_state_source = "local"
             self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
@@ -459,6 +467,7 @@ class MoonsideInstance:
         if await self._send_command(CMD_LED_OFF):
             self._is_on = False
             self._power_state_known = True
+            self._power_state_source = "local"
             self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
