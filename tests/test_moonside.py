@@ -19,6 +19,7 @@ from custom_components.moonside import (
     async_unload_entry,
 )
 from custom_components.moonside.config_flow import (
+    CONF_DEVICE_IDENTIFIER,
     MoonsideConfigFlow,
     MoonsideOptionsFlowHandler,
     _is_valid_manual_identifier,
@@ -758,7 +759,10 @@ class TestConfigFlow:
         flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
 
         await flow.async_step_manual(
-            {CONF_MAC: "AA:BB:CC:DD:EE:FF", CONF_NAME: "Bedroom Lamp"}
+            {
+                CONF_DEVICE_IDENTIFIER: "AA:BB:CC:DD:EE:FF",
+                CONF_NAME: "Bedroom Lamp",
+            }
         )
 
         _, kwargs = flow.async_create_entry.call_args
@@ -776,7 +780,7 @@ class TestConfigFlow:
         flow.async_show_form = MagicMock(return_value={"type": "form"})
 
         result = await flow.async_step_manual(
-            {CONF_MAC: "bad identifier!", CONF_NAME: "Bedroom Lamp"}
+            {CONF_DEVICE_IDENTIFIER: "bad identifier!", CONF_NAME: "Bedroom Lamp"}
         )
 
         assert result == {"type": "form"}
@@ -793,7 +797,7 @@ class TestConfigFlow:
         flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
 
         await flow.async_step_manual(
-            {CONF_MAC: "UUID-DEVICE-1", CONF_NAME: "Bedroom Lamp"}
+            {CONF_DEVICE_IDENTIFIER: "UUID-DEVICE-1", CONF_NAME: "Bedroom Lamp"}
         )
 
         _, kwargs = flow.async_create_entry.call_args
@@ -803,8 +807,44 @@ class TestConfigFlow:
         }
 
     @pytest.mark.asyncio
-    async def test_user_step_filters_discovery_and_falls_back_to_manual(self):
-        """Only Moonside discoveries should be offered; otherwise the flow should fall back to manual."""
+    async def test_manual_step_uses_device_identifier_field_in_form_schema(self):
+        """Manual setup should ask for a Bluetooth device identifier, not a MAC field."""
+        flow = MoonsideConfigFlow()
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+        result = await flow.async_step_manual()
+
+        assert result == {"type": "form"}
+        _, kwargs = flow.async_show_form.call_args
+        schema = kwargs["data_schema"].schema
+        required_keys = [
+            marker.schema for marker in schema if isinstance(marker, vol.Required)
+        ]
+        assert CONF_DEVICE_IDENTIFIER in required_keys
+        assert CONF_MAC not in required_keys
+
+    @pytest.mark.asyncio
+    async def test_user_step_explains_identifier_is_not_hardware_mac(self):
+        """Discovered-device setup should clarify that the identifier may not be a printed MAC address."""
+        flow = MoonsideConfigFlow()
+        flow.hass = MagicMock()
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
+        moonside = MagicMock(address="UUID-1", name="MOONSIDE-O101")
+
+        with patch(
+            "custom_components.moonside.config_flow.async_discovered_service_info",
+            return_value=[moonside],
+        ):
+            await flow.async_step_user()
+
+        _, kwargs = flow.async_show_form.call_args
+        assert kwargs["description_placeholders"] == {
+            "identifier_type": "Bluetooth device identifier"
+        }
+
+    @pytest.mark.asyncio
+    async def test_user_step_filters_discovery_and_uses_active_scan_fallback(self):
+        """If HA has no cached Moonside discovery, the flow should actively scan before falling back."""
         flow = MoonsideConfigFlow()
         flow.hass = MagicMock()
         flow.async_show_form = MagicMock(return_value={"type": "form"})
@@ -828,15 +868,51 @@ class TestConfigFlow:
 
         flow = MoonsideConfigFlow()
         flow.hass = MagicMock()
-        flow.async_step_manual = AsyncMock(return_value={"type": "manual"})
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
 
-        with patch(
-            "custom_components.moonside.config_flow.async_discovered_service_info",
-            return_value=[other],
+        with (
+            patch(
+                "custom_components.moonside.config_flow.async_discovered_service_info",
+                return_value=[other],
+            ),
+            patch(
+                "custom_components.moonside.config_flow.discover_devices",
+                new=AsyncMock(return_value=[("UUID-3", "MOONSIDE-L1")]),
+            ) as mock_scan,
+        ):
+            result = await flow.async_step_user()
+
+        assert result == {"type": "form"}
+        mock_scan.assert_awaited_once_with(flow.hass, timeout=3.0)
+        _, kwargs = flow.async_show_form.call_args
+        options = kwargs["data_schema"].schema[vol.Required(CONF_MAC)].container
+        assert options == {"UUID-3": "MOONSIDE-L1"}
+
+    @pytest.mark.asyncio
+    async def test_user_step_falls_back_to_manual_when_no_moonside_devices_are_found(
+        self,
+    ):
+        """Manual entry should remain the fallback if neither cached nor active scan finds a lamp."""
+        flow = MoonsideConfigFlow()
+        flow.hass = MagicMock()
+        flow.async_step_manual = AsyncMock(return_value={"type": "manual"})
+        other = MagicMock(address="UUID-2")
+        other.name = "Other Device"
+
+        with (
+            patch(
+                "custom_components.moonside.config_flow.async_discovered_service_info",
+                return_value=[other],
+            ),
+            patch(
+                "custom_components.moonside.config_flow.discover_devices",
+                new=AsyncMock(return_value=[]),
+            ) as mock_scan,
         ):
             result = await flow.async_step_user()
 
         assert result == {"type": "manual"}
+        mock_scan.assert_awaited_once_with(flow.hass, timeout=3.0)
         flow.async_step_manual.assert_awaited_once()
 
     @pytest.mark.asyncio

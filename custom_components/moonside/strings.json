@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Moonside",
-        "description": "Select a discovered Moonside device to set up.",
+        "description": "Select a discovered Moonside device to set up. Home Assistant uses the lamp's {identifier_type}, which may not match a printed hardware MAC address.",
         "data": {
           "mac": "Device",
           "name": "Name"
@@ -11,10 +11,13 @@
       },
       "manual": {
         "title": "Moonside",
-        "description": "Enter your Moonside device details manually.",
+        "description": "Enter your Moonside device details manually using the lamp's {identifier_type} shown by Home Assistant or Bluetooth tools.",
         "data": {
-          "mac": "Device Identifier",
+          "device_identifier": "Bluetooth device identifier",
           "name": "Name"
+        },
+        "data_description": {
+          "device_identifier": "This may be a UUID or platform-specific Bluetooth identifier rather than a hardware MAC address."
         }
       },
       "bluetooth_confirm": {

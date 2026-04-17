@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from types import SimpleNamespace
 from typing import Any
 
 import voluptuous as vol
@@ -27,11 +28,12 @@ from .const import (
     DEFAULT_NAME,
     DOMAIN,
 )
-from .moonside import get_display_name_from_ble_name
+from .moonside import discover_devices, get_display_name_from_ble_name
 
 LOGGER = logging.getLogger(__name__)
 
 MANUAL_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]*$")
+CONF_DEVICE_IDENTIFIER = "device_identifier"
 
 
 def _is_valid_manual_identifier(value: str) -> bool:
@@ -50,8 +52,47 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Initialize the config flow."""
-        self._discovered_devices: dict[str, BluetoothServiceInfoBleak] = {}
+        self._discovered_devices: dict[str, Any] = {}
         self._discovery_info: BluetoothServiceInfoBleak | None = None
+
+    async def _async_collect_discovered_devices(self) -> None:
+        """Populate discovered Moonside devices from HA cache, then active scan."""
+        current_addresses = self._async_current_ids()
+
+        for discovery_info in async_discovered_service_info(self.hass):
+            address = discovery_info.address
+
+            if address in current_addresses:
+                continue
+
+            if not discovery_info.name or not discovery_info.name.startswith(
+                "MOONSIDE"
+            ):
+                continue
+
+            LOGGER.debug(
+                "Found Moonside device during cached scan: %s (%s)",
+                discovery_info.name,
+                address,
+            )
+            self._discovered_devices[address] = discovery_info
+
+        if self._discovered_devices:
+            return
+
+        for address, name in await discover_devices(self.hass, timeout=3.0):
+            if address in current_addresses:
+                continue
+
+            LOGGER.debug(
+                "Found Moonside device during active scan: %s (%s)",
+                name,
+                address,
+            )
+            self._discovered_devices[address] = SimpleNamespace(
+                address=address,
+                name=name,
+            )
 
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
@@ -130,26 +171,7 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data=data,
             )
 
-        current_addresses = self._async_current_ids()
-
-        for discovery_info in async_discovered_service_info(self.hass):
-            address = discovery_info.address
-
-            if address in current_addresses:
-                continue
-
-            if not discovery_info.name or not discovery_info.name.startswith(
-                "MOONSIDE"
-            ):
-                continue
-
-            LOGGER.debug(
-                "Found Moonside device during scan: %s (%s)",
-                discovery_info.name,
-                address,
-            )
-
-            self._discovered_devices[address] = discovery_info
+        await self._async_collect_discovered_devices()
 
         if not self._discovered_devices:
             return await self.async_step_manual()
@@ -160,6 +182,9 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
+            description_placeholders={
+                "identifier_type": "Bluetooth device identifier",
+            },
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_MAC): vol.In(mac_addresses),
@@ -175,7 +200,7 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            mac_address = user_input[CONF_MAC].strip()
+            mac_address = user_input[CONF_DEVICE_IDENTIFIER].strip()
 
             if not _is_valid_manual_identifier(mac_address):
                 errors["base"] = "invalid_identifier"
@@ -193,9 +218,12 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="manual",
+            description_placeholders={
+                "identifier_type": "Bluetooth device identifier",
+            },
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_MAC): str,
+                    vol.Required(CONF_DEVICE_IDENTIFIER): str,
                     vol.Optional(CONF_NAME, default=DEFAULT_NAME): str,
                 }
             ),
