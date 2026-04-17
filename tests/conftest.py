@@ -37,6 +37,7 @@ def mock_moonside_instance():
     instance.brightness = 128
     instance.rgb_color = (255, 0, 0)
     instance.effect = None
+    instance.power_state_source = "local"
     instance.available = True
     instance.model = "Moonside"
     instance.rssi = -65

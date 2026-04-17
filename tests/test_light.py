@@ -42,6 +42,17 @@ class TestMoonsideLight:
         assert mock_moonside_light.rgb_color == (255, 0, 0)
         assert mock_moonside_light.available is True
 
+    def test_light_exposes_power_state_provenance(
+        self, mock_moonside_light, mock_moonside_instance
+    ):
+        """The light should expose where its current power state came from."""
+        mock_moonside_instance.power_state_source = "cloud"
+
+        assert mock_moonside_light.extra_state_attributes == {
+            "power_state_source": "cloud",
+            "power_state_cloud_derived": True,
+        }
+
     def test_light_reports_assumed_state_when_power_is_unverified(
         self, mock_moonside_light, mock_moonside_instance
     ):
@@ -115,6 +126,7 @@ class TestMoonsideLight:
 
         assert mock_moonside_instance._is_on is True
         assert mock_moonside_instance._power_state_known is False
+        assert mock_moonside_instance._power_state_source == "restored"
 
     @pytest.mark.asyncio
     async def test_restored_attributes_are_replayed_but_power_stays_unverified(

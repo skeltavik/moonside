@@ -95,6 +95,15 @@ class MoonsideLight(RestoreEntity, LightEntity):
         return self._instance.brightness
 
     @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return state provenance details for the UI."""
+        source = self._instance.power_state_source
+        return {
+            "power_state_source": source,
+            "power_state_cloud_derived": source == "cloud",
+        }
+
+    @property
     def rgb_color(self) -> tuple[int, int, int] | None:
         """Return the RGB color value."""
         return self._instance.rgb_color
@@ -137,6 +146,7 @@ class MoonsideLight(RestoreEntity, LightEntity):
             elif last_state.state == "off":
                 self._instance._is_on = False
             self._instance._power_state_known = False
+            self._instance._power_state_source = "restored"
 
             # Restore brightness
             brightness = last_state.attributes.get(ATTR_BRIGHTNESS)
