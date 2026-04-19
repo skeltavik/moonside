@@ -61,7 +61,7 @@ def _is_valid_manual_identifier(value: str) -> bool:
 class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Moonside."""
 
-    VERSION = 3
+    VERSION = 4
 
     def __init__(self) -> None:
         """Initialize the config flow."""

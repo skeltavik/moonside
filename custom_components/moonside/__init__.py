@@ -35,6 +35,12 @@ from .moonside import MoonsideInstance, get_display_name_from_ble_name
 LOGGER = logging.getLogger(__name__)
 
 BLE_NAME_PATTERN = re.compile(r"^MOONSIDE-[A-Z0-9._-]+$")
+CLOUD_OPTION_KEYS = (
+    CONF_CLOUD_EMAIL,
+    CONF_CLOUD_PASSWORD,
+    CONF_CLOUD_DEVICE_ID,
+    CONF_CLOUD_WRITE_GRACE_SECONDS,
+)
 
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,
@@ -116,16 +122,13 @@ def _validate_color_cycle_colors(value: str) -> list[tuple[int, int, int]]:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Moonside from a config entry."""
-    entry_options = dict(entry.data)
-    entry_options.update(entry.options)
-
     mac_address = entry.data[CONF_MAC]
     name = entry.data.get(CONF_NAME, DEFAULT_NAME)
     ble_name = entry.data.get(CONF_BLE_NAME)
-    cloud_email = entry_options.get(CONF_CLOUD_EMAIL)
-    cloud_password = entry_options.get(CONF_CLOUD_PASSWORD)
-    cloud_device_id = entry_options.get(CONF_CLOUD_DEVICE_ID)
-    cloud_write_grace_seconds = entry_options.get(
+    cloud_email = entry.options.get(CONF_CLOUD_EMAIL)
+    cloud_password = entry.options.get(CONF_CLOUD_PASSWORD)
+    cloud_device_id = entry.options.get(CONF_CLOUD_DEVICE_ID)
+    cloud_write_grace_seconds = entry.options.get(
         CONF_CLOUD_WRITE_GRACE_SECONDS,
         DEFAULT_CLOUD_WRITE_GRACE_SECONDS,
     )
@@ -305,7 +308,7 @@ def _derive_ble_name(entry: ConfigEntry, data: dict[str, Any]) -> str | None:
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate old config entries to the latest version."""
-    if entry.version >= 3:
+    if entry.version >= 4:
         return True
 
     LOGGER.debug(
@@ -315,6 +318,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     data: dict[str, Any] = dict(entry.data)
+    options: dict[str, Any] = dict(entry.options)
     title = entry.title
 
     if entry.version < 2:
@@ -334,10 +338,20 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if _should_replace_display_name(title, ble_name):
         title = friendly_name
 
-    hass.config_entries.async_update_entry(entry, data=data, title=title, version=3)
+    for key in CLOUD_OPTION_KEYS:
+        if key in data and key not in options:
+            options[key] = data.pop(key)
+
+    hass.config_entries.async_update_entry(
+        entry,
+        data=data,
+        options=options,
+        title=title,
+        version=4,
+    )
 
     LOGGER.debug(
-        "Migration of Moonside config entry %s to version 3 successful", entry.entry_id
+        "Migration of Moonside config entry %s to version 4 successful", entry.entry_id
     )
     return True
 

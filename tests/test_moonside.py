@@ -1130,8 +1130,9 @@ class TestConfigEntryMigration:
                 CONF_MAC: "AA:BB:CC:DD:EE:FF",
                 CONF_NAME: "Bedroom Lamp",
             },
+            options={},
             title="Bedroom Lamp",
-            version=3,
+            version=4,
         )
 
     @pytest.mark.asyncio
@@ -1158,8 +1159,9 @@ class TestConfigEntryMigration:
                 CONF_NAME: "Bedroom Lamp",
                 CONF_BLE_NAME: "MOONSIDE-O101",
             },
+            options={},
             title=entry.title,
-            version=3,
+            version=4,
         )
 
     @pytest.mark.asyncio
@@ -1186,8 +1188,9 @@ class TestConfigEntryMigration:
                 CONF_NAME: "Lamp One",
                 CONF_BLE_NAME: "MOONSIDE-L1",
             },
+            options={},
             title="Moonside Light",
-            version=3,
+            version=4,
         )
 
     @pytest.mark.asyncio
@@ -1214,8 +1217,9 @@ class TestConfigEntryMigration:
                 CONF_NAME: "Bedroom Lamp",
                 CONF_BLE_NAME: "MOONSIDE-O101",
             },
+            options={},
             title="Halo Lamp",
-            version=3,
+            version=4,
         )
 
     @pytest.mark.asyncio
@@ -1241,8 +1245,9 @@ class TestConfigEntryMigration:
                 CONF_MAC: "UUID-5",
                 CONF_NAME: "Bedroom Lamp",
             },
+            options={},
             title="Moonside Light",
-            version=3,
+            version=4,
         )
 
     @pytest.mark.asyncio
@@ -1270,8 +1275,9 @@ class TestConfigEntryMigration:
                 CONF_NAME: "Halo Lamp",
                 CONF_BLE_NAME: "MOONSIDE-O101",
             },
+            options={},
             title="Halo Lamp",
-            version=3,
+            version=4,
         )
 
     @pytest.mark.asyncio
@@ -1299,8 +1305,47 @@ class TestConfigEntryMigration:
                 CONF_NAME: "Bedroom Lamp",
                 CONF_BLE_NAME: "MOONSIDE-O101",
             },
+            options={},
             title="Bedroom Lamp",
-            version=3,
+            version=4,
+        )
+
+    @pytest.mark.asyncio
+    async def test_migrate_v3_entry_moves_cloud_settings_from_data_to_options(self):
+        """Version 3 entries should move legacy cloud settings into options."""
+        hass = MagicMock()
+        hass.config_entries.async_update_entry = MagicMock()
+        entry = MagicMock()
+        entry.entry_id = "entry-8"
+        entry.version = 3
+        entry.title = "Bedroom Lamp"
+        entry.data = {
+            CONF_MAC: "UUID-8",
+            CONF_NAME: "Bedroom Lamp",
+            CONF_CLOUD_EMAIL: "user@example.com",
+            CONF_CLOUD_PASSWORD: "secret",
+            CONF_CLOUD_DEVICE_ID: "device-1",
+            CONF_CLOUD_WRITE_GRACE_SECONDS: 25,
+        }
+        entry.options = {}
+
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        hass.config_entries.async_update_entry.assert_called_once_with(
+            entry,
+            data={
+                CONF_MAC: "UUID-8",
+                CONF_NAME: "Bedroom Lamp",
+            },
+            options={
+                CONF_CLOUD_EMAIL: "user@example.com",
+                CONF_CLOUD_PASSWORD: "secret",
+                CONF_CLOUD_DEVICE_ID: "device-1",
+                CONF_CLOUD_WRITE_GRACE_SECONDS: 25,
+            },
+            title="Bedroom Lamp",
+            version=4,
         )
 
 
@@ -1396,43 +1441,6 @@ class TestIntegrationLifecycle:
         assert kwargs["cloud_password"] == "secret"
         assert kwargs["cloud_device_id"] == "device-1"
         assert kwargs["cloud_write_grace_seconds"] == 25
-
-    @pytest.mark.asyncio
-    async def test_setup_entry_accepts_cloud_settings_from_entry_data(self):
-        """Initial config-flow cloud settings stored in entry data should still be used."""
-        hass = MagicMock()
-        hass.data = {}
-        hass.config_entries.async_forward_entry_setups = AsyncMock()
-        hass.bus.async_listen_once = MagicMock(return_value=MagicMock())
-        hass.services.has_service = MagicMock(return_value=True)
-
-        entry = MagicMock()
-        entry.entry_id = "entry-1"
-        entry.data = {
-            CONF_MAC: "UUID-1",
-            CONF_NAME: "Bedroom Lamp",
-            CONF_CLOUD_EMAIL: "user@example.com",
-            CONF_CLOUD_PASSWORD: "secret",
-            CONF_CLOUD_DEVICE_ID: "device-1",
-            CONF_CLOUD_WRITE_GRACE_SECONDS: 25,
-        }
-        entry.options = {}
-        entry.add_update_listener = MagicMock(return_value=MagicMock())
-        entry.async_on_unload = MagicMock()
-
-        instance = MagicMock()
-        with patch(
-            "custom_components.moonside.MoonsideInstance", return_value=instance
-        ) as mock_instance:
-            result = await async_setup_entry(hass, entry)
-
-        assert result is True
-        _, kwargs = mock_instance.call_args
-        assert kwargs["cloud_email"] == "user@example.com"
-        assert kwargs["cloud_password"] == "secret"
-        assert kwargs["cloud_device_id"] == "device-1"
-        assert kwargs["cloud_write_grace_seconds"] == 25
-
 
 class TestOptionsFlow:
     """Test options flow behavior."""
