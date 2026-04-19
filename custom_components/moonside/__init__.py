@@ -116,13 +116,16 @@ def _validate_color_cycle_colors(value: str) -> list[tuple[int, int, int]]:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Moonside from a config entry."""
+    entry_options = dict(entry.data)
+    entry_options.update(entry.options)
+
     mac_address = entry.data[CONF_MAC]
     name = entry.data.get(CONF_NAME, DEFAULT_NAME)
     ble_name = entry.data.get(CONF_BLE_NAME)
-    cloud_email = entry.options.get(CONF_CLOUD_EMAIL)
-    cloud_password = entry.options.get(CONF_CLOUD_PASSWORD)
-    cloud_device_id = entry.options.get(CONF_CLOUD_DEVICE_ID)
-    cloud_write_grace_seconds = entry.options.get(
+    cloud_email = entry_options.get(CONF_CLOUD_EMAIL)
+    cloud_password = entry_options.get(CONF_CLOUD_PASSWORD)
+    cloud_device_id = entry_options.get(CONF_CLOUD_DEVICE_ID)
+    cloud_write_grace_seconds = entry_options.get(
         CONF_CLOUD_WRITE_GRACE_SECONDS,
         DEFAULT_CLOUD_WRITE_GRACE_SECONDS,
     )

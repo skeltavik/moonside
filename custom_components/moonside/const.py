@@ -30,6 +30,8 @@ FIREBASE_API_KEY: Final = "AIzaSyCC-qQZqcZhxqsbO7GB0nXZShab9gV06Bk"
 FIREBASE_IDENTITY_URL: Final = (
     "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword"
 )
+FIREBASE_SIGN_UP_URL: Final = "https://identitytoolkit.googleapis.com/v1/accounts:signUp"
+FIREBASE_OOB_URL: Final = "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode"
 FIREBASE_TOKEN_REFRESH_URL: Final = "https://securetoken.googleapis.com/v1/token"
 REALTIME_DATABASE_URL: Final = "https://moonside-501a1.firebaseio.com"
 

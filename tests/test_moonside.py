@@ -19,11 +19,16 @@ from custom_components.moonside import (
     async_unload_entry,
 )
 from custom_components.moonside.config_flow import (
+    ACTION_CREATE_ACCOUNT,
+    ACTION_RESET_PASSWORD,
+    ACTION_SIGN_IN,
+    CONF_CLOUD_AUTH_ACTION,
     CONF_DEVICE_IDENTIFIER,
     MoonsideConfigFlow,
     MoonsideOptionsFlowHandler,
     _is_valid_manual_identifier,
 )
+from custom_components.moonside.cloud import MoonsideCloudAuthError
 from custom_components.moonside.const import (
     CONF_BLE_NAME,
     CONF_CLOUD_DEVICE_ID,
@@ -735,13 +740,13 @@ class TestConfigFlow:
         flow = MoonsideConfigFlow()
         flow._discovery_info = MagicMock(address="UUID-1")
         flow._discovery_info.name = "MOONSIDE-O101"
-        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
 
         await flow.async_step_bluetooth_confirm({CONF_NAME: "Bedroom Lamp"})
 
-        _, kwargs = flow.async_create_entry.call_args
-        assert kwargs["title"] == "Bedroom Lamp"
-        assert kwargs["data"] == {
+        _, kwargs = flow.async_show_form.call_args
+        assert kwargs["step_id"] == "cloud"
+        assert flow._entry_data == {
             CONF_MAC: "UUID-1",
             CONF_BLE_NAME: "MOONSIDE-O101",
             CONF_NAME: "Bedroom Lamp",
@@ -768,12 +773,13 @@ class TestConfigFlow:
         flow = MoonsideConfigFlow()
         flow._discovery_info = MagicMock(address="UUID-2")
         flow._discovery_info.name = None
-        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
 
         await flow.async_step_bluetooth_confirm({CONF_NAME: "Bedroom Lamp"})
 
-        _, kwargs = flow.async_create_entry.call_args
-        assert kwargs["data"] == {
+        _, kwargs = flow.async_show_form.call_args
+        assert kwargs["step_id"] == "cloud"
+        assert flow._entry_data == {
             CONF_MAC: "UUID-2",
             CONF_NAME: "Bedroom Lamp",
         }
@@ -784,17 +790,17 @@ class TestConfigFlow:
         flow = MoonsideConfigFlow()
         flow.async_set_unique_id = AsyncMock()
         flow._abort_if_unique_id_configured = MagicMock()
-        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
 
-        await flow.async_step_manual(
+        result = await flow.async_step_manual(
             {
                 CONF_DEVICE_IDENTIFIER: "AA:BB:CC:DD:EE:FF",
                 CONF_NAME: "Bedroom Lamp",
             }
         )
 
-        _, kwargs = flow.async_create_entry.call_args
-        assert kwargs["data"] == {
+        assert result == {"type": "form"}
+        assert flow._entry_data == {
             CONF_MAC: "AA:BB:CC:DD:EE:FF",
             CONF_NAME: "Bedroom Lamp",
         }
@@ -822,14 +828,14 @@ class TestConfigFlow:
         flow = MoonsideConfigFlow()
         flow.async_set_unique_id = AsyncMock()
         flow._abort_if_unique_id_configured = MagicMock()
-        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
 
-        await flow.async_step_manual(
+        result = await flow.async_step_manual(
             {CONF_DEVICE_IDENTIFIER: "UUID-DEVICE-1", CONF_NAME: "Bedroom Lamp"}
         )
 
-        _, kwargs = flow.async_create_entry.call_args
-        assert kwargs["data"] == {
+        assert result == {"type": "form"}
+        assert flow._entry_data == {
             CONF_MAC: "UUID-DEVICE-1",
             CONF_NAME: "Bedroom Lamp",
         }
@@ -949,15 +955,15 @@ class TestConfigFlow:
         flow = MoonsideConfigFlow()
         flow.async_set_unique_id = AsyncMock()
         flow._abort_if_unique_id_configured = MagicMock()
-        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
         discovery_info = MagicMock(address="UUID-3")
         discovery_info.name = None
         flow._discovered_devices = {"UUID-3": discovery_info}
 
-        await flow.async_step_user({CONF_MAC: "UUID-3", CONF_NAME: "Bedroom Lamp"})
+        result = await flow.async_step_user({CONF_MAC: "UUID-3", CONF_NAME: "Bedroom Lamp"})
 
-        _, kwargs = flow.async_create_entry.call_args
-        assert kwargs["data"] == {
+        assert result == {"type": "form"}
+        assert flow._entry_data == {
             CONF_MAC: "UUID-3",
             CONF_NAME: "Bedroom Lamp",
         }
@@ -968,20 +974,133 @@ class TestConfigFlow:
         flow = MoonsideConfigFlow()
         flow.async_set_unique_id = AsyncMock()
         flow._abort_if_unique_id_configured = MagicMock()
-        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
         discovery_info = MagicMock(address="UUID-1")
         discovery_info.name = "MOONSIDE-O101"
         flow._discovered_devices = {"UUID-1": discovery_info}
 
-        await flow.async_step_user({CONF_MAC: "UUID-1"})
+        result = await flow.async_step_user({CONF_MAC: "UUID-1"})
 
-        _, kwargs = flow.async_create_entry.call_args
-        assert kwargs["title"] == "Halo Lamp"
-        assert kwargs["data"] == {
+        assert result == {"type": "form"}
+        assert flow._entry_data == {
             CONF_MAC: "UUID-1",
             CONF_BLE_NAME: "MOONSIDE-O101",
             CONF_NAME: "Halo Lamp",
         }
+
+    @pytest.mark.asyncio
+    async def test_cloud_step_creates_entry_with_validated_cloud_settings(self):
+        """Initial setup should save validated cloud settings into the created entry."""
+        flow = MoonsideConfigFlow()
+        flow.hass = MagicMock()
+        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+
+        with patch(
+            "custom_components.moonside.config_flow.MoonsideCloudClient.async_fetch_devices",
+            new=AsyncMock(return_value={"device-1": {"deviceName": "Lamp"}}),
+        ):
+            result = await flow._async_step_cloud(
+                {
+                    CONF_MAC: "UUID-1",
+                    CONF_NAME: "Halo Lamp",
+                },
+                {
+                    CONF_CLOUD_AUTH_ACTION: ACTION_SIGN_IN,
+                    CONF_CLOUD_EMAIL: " user@example.com ",
+                    CONF_CLOUD_PASSWORD: "secret",
+                    CONF_CLOUD_DEVICE_ID: " device-1 ",
+                    CONF_CLOUD_WRITE_GRACE_SECONDS: 25,
+                },
+            )
+
+        assert result == {"type": "create_entry"}
+        _, kwargs = flow.async_create_entry.call_args
+        assert kwargs["title"] == "Halo Lamp"
+        assert kwargs["data"] == {
+            CONF_MAC: "UUID-1",
+            CONF_NAME: "Halo Lamp",
+        }
+        assert kwargs["options"] == {
+            CONF_CLOUD_EMAIL: "user@example.com",
+            CONF_CLOUD_PASSWORD: "secret",
+            CONF_CLOUD_DEVICE_ID: "device-1",
+            CONF_CLOUD_WRITE_GRACE_SECONDS: 25,
+        }
+
+    @pytest.mark.asyncio
+    async def test_cloud_step_rejects_invalid_cloud_auth(self):
+        """Initial setup should surface rejected cloud credentials before entry creation."""
+        flow = MoonsideConfigFlow()
+        flow.hass = MagicMock()
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+        with patch(
+            "custom_components.moonside.config_flow.MoonsideCloudClient.async_fetch_devices",
+            new=AsyncMock(side_effect=MoonsideCloudAuthError("bad credentials")),
+        ):
+            result = await flow._async_step_cloud(
+                {CONF_MAC: "UUID-1", CONF_NAME: "Halo Lamp"},
+                {
+                    CONF_CLOUD_AUTH_ACTION: ACTION_SIGN_IN,
+                    CONF_CLOUD_EMAIL: "user@example.com",
+                    CONF_CLOUD_PASSWORD: "secret",
+                },
+            )
+
+        assert result == {"type": "form"}
+        _, kwargs = flow.async_show_form.call_args
+        assert kwargs["errors"] == {"base": "invalid_auth"}
+
+    @pytest.mark.asyncio
+    async def test_cloud_step_creates_account_when_requested(self):
+        """Initial setup should support creating a cloud account."""
+        flow = MoonsideConfigFlow()
+        flow.hass = MagicMock()
+        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+
+        with patch(
+            "custom_components.moonside.config_flow.MoonsideCloudClient.async_create_account",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await flow._async_step_cloud(
+                {CONF_MAC: "UUID-1", CONF_NAME: "Halo Lamp"},
+                {
+                    CONF_CLOUD_AUTH_ACTION: ACTION_CREATE_ACCOUNT,
+                    CONF_CLOUD_EMAIL: "new@example.com",
+                    CONF_CLOUD_PASSWORD: "secret",
+                    CONF_CLOUD_WRITE_GRACE_SECONDS: 10,
+                },
+            )
+
+        assert result == {"type": "create_entry"}
+        _, kwargs = flow.async_create_entry.call_args
+        assert kwargs["options"][CONF_CLOUD_EMAIL] == "new@example.com"
+        assert kwargs["options"][CONF_CLOUD_PASSWORD] == "secret"
+
+    @pytest.mark.asyncio
+    async def test_cloud_step_sends_reset_email_and_stays_on_form(self):
+        """Password reset should send the email and keep the user on the cloud form."""
+        flow = MoonsideConfigFlow()
+        flow.hass = MagicMock()
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+        with patch(
+            "custom_components.moonside.config_flow.MoonsideCloudClient.async_send_password_reset_email",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await flow._async_step_cloud(
+                {CONF_MAC: "UUID-1", CONF_NAME: "Halo Lamp"},
+                {
+                    CONF_CLOUD_AUTH_ACTION: ACTION_RESET_PASSWORD,
+                    CONF_CLOUD_EMAIL: "user@example.com",
+                },
+            )
+
+        assert result == {"type": "form"}
+        _, kwargs = flow.async_show_form.call_args
+        assert kwargs["description_placeholders"]["status_message"] == (
+            "Password reset email sent."
+        )
 
 
 class TestConfigEntryMigration:
@@ -1278,6 +1397,42 @@ class TestIntegrationLifecycle:
         assert kwargs["cloud_device_id"] == "device-1"
         assert kwargs["cloud_write_grace_seconds"] == 25
 
+    @pytest.mark.asyncio
+    async def test_setup_entry_accepts_cloud_settings_from_entry_data(self):
+        """Initial config-flow cloud settings stored in entry data should still be used."""
+        hass = MagicMock()
+        hass.data = {}
+        hass.config_entries.async_forward_entry_setups = AsyncMock()
+        hass.bus.async_listen_once = MagicMock(return_value=MagicMock())
+        hass.services.has_service = MagicMock(return_value=True)
+
+        entry = MagicMock()
+        entry.entry_id = "entry-1"
+        entry.data = {
+            CONF_MAC: "UUID-1",
+            CONF_NAME: "Bedroom Lamp",
+            CONF_CLOUD_EMAIL: "user@example.com",
+            CONF_CLOUD_PASSWORD: "secret",
+            CONF_CLOUD_DEVICE_ID: "device-1",
+            CONF_CLOUD_WRITE_GRACE_SECONDS: 25,
+        }
+        entry.options = {}
+        entry.add_update_listener = MagicMock(return_value=MagicMock())
+        entry.async_on_unload = MagicMock()
+
+        instance = MagicMock()
+        with patch(
+            "custom_components.moonside.MoonsideInstance", return_value=instance
+        ) as mock_instance:
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        _, kwargs = mock_instance.call_args
+        assert kwargs["cloud_email"] == "user@example.com"
+        assert kwargs["cloud_password"] == "secret"
+        assert kwargs["cloud_device_id"] == "device-1"
+        assert kwargs["cloud_write_grace_seconds"] == 25
+
 
 class TestOptionsFlow:
     """Test options flow behavior."""
@@ -1287,17 +1442,24 @@ class TestOptionsFlow:
         """Options flow should persist cloud credentials and an optional device id."""
         entry = MagicMock()
         entry.options = {}
+        entry.data = {}
         flow = MoonsideOptionsFlowHandler(entry)
+        flow.hass = MagicMock()
         flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
 
-        result = await flow.async_step_init(
-            {
-                CONF_CLOUD_EMAIL: "user@example.com",
-                CONF_CLOUD_PASSWORD: "secret",
-                CONF_CLOUD_DEVICE_ID: "device-1",
-                CONF_CLOUD_WRITE_GRACE_SECONDS: 25,
-            }
-        )
+        with patch(
+            "custom_components.moonside.config_flow.MoonsideCloudClient.async_fetch_devices",
+            new=AsyncMock(return_value={"device-1": {"deviceName": "Lamp"}}),
+        ):
+            result = await flow.async_step_init(
+                {
+                    CONF_CLOUD_AUTH_ACTION: ACTION_SIGN_IN,
+                    CONF_CLOUD_EMAIL: "user@example.com",
+                    CONF_CLOUD_PASSWORD: "secret",
+                    CONF_CLOUD_DEVICE_ID: "device-1",
+                    CONF_CLOUD_WRITE_GRACE_SECONDS: 25,
+                }
+            )
 
         assert result == {"type": "create_entry"}
         _, kwargs = flow.async_create_entry.call_args
@@ -1313,6 +1475,7 @@ class TestOptionsFlow:
         """Options form should expose the current grace-window value."""
         entry = MagicMock()
         entry.options = {CONF_CLOUD_WRITE_GRACE_SECONDS: 25}
+        entry.data = {}
         flow = MoonsideOptionsFlowHandler(entry)
         flow.async_show_form = MagicMock(return_value={"type": "form"})
 
@@ -1321,6 +1484,7 @@ class TestOptionsFlow:
         assert result == {"type": "form"}
         _, kwargs = flow.async_show_form.call_args
         schema = kwargs["data_schema"]
+        assert schema({})[CONF_CLOUD_AUTH_ACTION] == ACTION_SIGN_IN
         assert schema({})[CONF_CLOUD_WRITE_GRACE_SECONDS] == 25
 
     @pytest.mark.asyncio
@@ -1331,11 +1495,13 @@ class TestOptionsFlow:
             CONF_CLOUD_EMAIL: "user@example.com",
             CONF_CLOUD_PASSWORD: "secret",
         }
+        entry.data = {}
         flow = MoonsideOptionsFlowHandler(entry)
         flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
 
         await flow.async_step_init(
             {
+                CONF_CLOUD_AUTH_ACTION: ACTION_SIGN_IN,
                 CONF_CLOUD_EMAIL: "",
                 CONF_CLOUD_PASSWORD: "",
                 CONF_CLOUD_DEVICE_ID: "",
@@ -1344,6 +1510,87 @@ class TestOptionsFlow:
 
         _, kwargs = flow.async_create_entry.call_args
         assert kwargs["data"] == {}
+
+    @pytest.mark.asyncio
+    async def test_options_flow_rejects_invalid_cloud_auth(self):
+        """Options flow should not save rejected cloud credentials."""
+        entry = MagicMock()
+        entry.options = {}
+        entry.data = {}
+        flow = MoonsideOptionsFlowHandler(entry)
+        flow.hass = MagicMock()
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+        with patch(
+            "custom_components.moonside.config_flow.MoonsideCloudClient.async_fetch_devices",
+            new=AsyncMock(side_effect=MoonsideCloudAuthError("bad credentials")),
+        ):
+            result = await flow.async_step_init(
+                {
+                    CONF_CLOUD_AUTH_ACTION: ACTION_SIGN_IN,
+                    CONF_CLOUD_EMAIL: "user@example.com",
+                    CONF_CLOUD_PASSWORD: "secret",
+                    CONF_CLOUD_DEVICE_ID: "device-1",
+                    CONF_CLOUD_WRITE_GRACE_SECONDS: 25,
+                }
+            )
+
+        assert result == {"type": "form"}
+        _, kwargs = flow.async_show_form.call_args
+        assert kwargs["errors"] == {"base": "invalid_auth"}
+
+    @pytest.mark.asyncio
+    async def test_options_flow_can_create_account(self):
+        """Options flow should support cloud account creation."""
+        entry = MagicMock()
+        entry.options = {}
+        entry.data = {}
+        flow = MoonsideOptionsFlowHandler(entry)
+        flow.hass = MagicMock()
+        flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+
+        with patch(
+            "custom_components.moonside.config_flow.MoonsideCloudClient.async_create_account",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await flow.async_step_init(
+                {
+                    CONF_CLOUD_AUTH_ACTION: ACTION_CREATE_ACCOUNT,
+                    CONF_CLOUD_EMAIL: "new@example.com",
+                    CONF_CLOUD_PASSWORD: "secret",
+                }
+            )
+
+        assert result == {"type": "create_entry"}
+        _, kwargs = flow.async_create_entry.call_args
+        assert kwargs["data"][CONF_CLOUD_EMAIL] == "new@example.com"
+
+    @pytest.mark.asyncio
+    async def test_options_flow_can_send_reset_email(self):
+        """Options flow should send password reset mail without saving credentials."""
+        entry = MagicMock()
+        entry.options = {}
+        entry.data = {}
+        flow = MoonsideOptionsFlowHandler(entry)
+        flow.hass = MagicMock()
+        flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+        with patch(
+            "custom_components.moonside.config_flow.MoonsideCloudClient.async_send_password_reset_email",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await flow.async_step_init(
+                {
+                    CONF_CLOUD_AUTH_ACTION: ACTION_RESET_PASSWORD,
+                    CONF_CLOUD_EMAIL: "user@example.com",
+                }
+            )
+
+        assert result == {"type": "form"}
+        _, kwargs = flow.async_show_form.call_args
+        assert kwargs["description_placeholders"]["status_message"] == (
+            "Password reset email sent."
+        )
 
 
 class TestValidationHelpers:
