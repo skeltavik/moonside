@@ -23,6 +23,17 @@
       "bluetooth_confirm": {
         "title": "Moonside",
         "description": "Do you want to set up {name} ({address})?"
+      },
+      "cloud": {
+        "title": "Moonside cloud state",
+        "description": "Optionally sign in, create a Moonside cloud account, or send a password reset email. Home Assistant reads authoritative cloud state while continuing to control the lamp locally over Bluetooth. {status_message}",
+        "data": {
+          "cloud_auth_action": "Cloud action",
+          "cloud_email": "Cloud email",
+          "cloud_password": "Cloud password",
+          "cloud_device_id": "Cloud device ID",
+          "cloud_write_grace_seconds": "Cloud write grace seconds"
+        }
       }
     },
     "abort": {
@@ -32,6 +43,12 @@
     },
     "error": {
       "invalid_identifier": "Enter a valid Bluetooth device identifier",
+      "incomplete_cloud_auth": "Enter both cloud email and password, or leave both blank",
+      "cloud_email_required": "Enter a cloud email address",
+      "email_already_exists": "A cloud account already exists for that email address",
+      "email_not_found": "No cloud account was found for that email address",
+      "invalid_email": "Enter a valid email address",
+      "invalid_auth": "Cloud credentials were rejected",
       "cannot_connect": "Failed to connect",
       "unknown": "Unexpected error"
     }
@@ -40,8 +57,9 @@
     "step": {
       "init": {
         "title": "Moonside cloud state",
-        "description": "Optionally configure Moonside cloud credentials so Home Assistant can read authoritative device state while continuing to control the lamp locally over Bluetooth.",
+        "description": "Optionally sign in, create a Moonside cloud account, or send a password reset email. Home Assistant reads authoritative cloud state while continuing to control the lamp locally over Bluetooth. {status_message}",
         "data": {
+          "cloud_auth_action": "Cloud action",
           "cloud_email": "Cloud email",
           "cloud_password": "Cloud password",
           "cloud_device_id": "Cloud device ID",

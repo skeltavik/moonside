@@ -11,6 +11,8 @@ from aiohttp import ClientResponse, ClientSession
 from .const import (
     FIREBASE_API_KEY,
     FIREBASE_IDENTITY_URL,
+    FIREBASE_OOB_URL,
+    FIREBASE_SIGN_UP_URL,
     FIREBASE_TOKEN_REFRESH_URL,
     REALTIME_DATABASE_URL,
     get_effect_key_from_command,
@@ -51,6 +53,35 @@ class MoonsideCloudClient:
         await self._raise_for_status(response)
         payload: dict[str, dict[str, Any]] | None = await response.json()
         return payload or {}
+
+    async def async_create_account(self) -> None:
+        """Create a Firebase email/password account and cache the issued tokens."""
+        response = await self._session.post(
+            f"{FIREBASE_SIGN_UP_URL}?key={self._api_key}",
+            json={
+                "email": self._email,
+                "password": self._password,
+                "returnSecureToken": True,
+            },
+        )
+        await self._raise_for_status(response, auth_request=True)
+        payload = await response.json()
+        self._id_token = payload["idToken"]
+        self._refresh_token = payload["refreshToken"]
+        self._local_id = payload["localId"]
+        expires_in = int(payload.get("expiresIn", "3600"))
+        self._token_expiry = time.monotonic() + max(expires_in - 120, 60)
+
+    async def async_send_password_reset_email(self) -> None:
+        """Send a Firebase password reset email."""
+        response = await self._session.post(
+            f"{FIREBASE_OOB_URL}?key={self._api_key}",
+            json={
+                "requestType": "PASSWORD_RESET",
+                "email": self._email,
+            },
+        )
+        await self._raise_for_status(response, auth_request=True)
 
     async def async_get_device_state(self, device_id: str) -> dict[str, Any]:
         """Fetch state for a single device."""
@@ -125,10 +156,27 @@ class MoonsideCloudClient:
         try:
             response.raise_for_status()
         except Exception as err:  # pylint: disable=broad-except
-            details = await response.text()
+            details = await _extract_error_details(response)
             if auth_request and response.status == 400:
                 raise MoonsideCloudAuthError(details) from err
             raise MoonsideCloudError(details) from err
+
+
+async def _extract_error_details(response: ClientResponse) -> str:
+    """Return the most useful error string from a Firebase response."""
+    try:
+        payload = await response.json()
+    except Exception:  # pylint: disable=broad-except
+        return await response.text()
+
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            message = error.get("message")
+            if isinstance(message, str) and message:
+                return message
+
+    return str(payload)
 
 
 def infer_power_state(device_state: dict[str, Any]) -> bool | None:
