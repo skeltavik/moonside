@@ -5,5 +5,5 @@
   "country": ["BE", "NL", "DE", "US", "GB"],
   "homeassistant": "2024.1.6",
   "render_readme": true,
-  "iot_class": "local_polling"
+  "iot_class": "hybrid"
 }

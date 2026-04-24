@@ -28,7 +28,11 @@ from custom_components.moonside.config_flow import (
     MoonsideOptionsFlowHandler,
     _is_valid_manual_identifier,
 )
-from custom_components.moonside.cloud import MoonsideCloudAuthError
+from custom_components.moonside.cloud import (
+    MoonsideCloudAuthError,
+    infer_brightness,
+    infer_rgb_color,
+)
 from custom_components.moonside.const import (
     CONF_BLE_NAME,
     CONF_CLOUD_DEVICE_ID,
@@ -38,6 +42,8 @@ from custom_components.moonside.const import (
     CONF_MAC,
     CONF_NAME,
     DEFAULT_CLOUD_WRITE_GRACE_SECONDS,
+    get_effect_key_from_name,
+    get_effect_list,
 )
 from custom_components.moonside.moonside import MoonsideInstance, discover_devices
 
@@ -158,6 +164,29 @@ class TestMoonsideInstance:
             result = await instance.set_color((255, 0, 0))
             assert result is True
             assert instance.rgb_color == (255, 0, 0)
+
+    @pytest.mark.asyncio
+    async def test_set_color_fails_when_follow_up_brightness_write_fails(self):
+        """Color changes should not report success if brightness cannot be applied."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+
+        with (
+            patch.object(instance, "_send_command", new=AsyncMock(return_value=True)),
+            patch.object(
+                instance, "set_brightness", new=AsyncMock(return_value=False)
+            ),
+        ):
+            result = await instance.set_color((255, 0, 0))
+
+        assert result is False
+
+    def test_effect_list_uses_names_that_turn_on_accepts(self):
+        """Effect dropdown values should map back to effect keys."""
+        effect_name = get_effect_list()[0]
+
+        assert effect_name == "Rainbow One"
+        assert get_effect_key_from_name(effect_name) == "rainbow_one"
+        assert get_effect_key_from_name("rainbow_one") == "rainbow_one"
 
     @pytest.mark.asyncio
     async def test_pulse(self):
@@ -457,6 +486,15 @@ class TestMoonsideInstance:
         assert instance.rgb_color == (255, 0, 128)
         assert instance.brightness == 191
         assert instance.effect is None
+
+    def test_cloud_brightness_command_uses_device_scale(self):
+        """BRIGH commands use the device's 0-120 brightness scale."""
+        assert infer_brightness({"controlData": "BRIGH060"}) == 128
+
+    def test_cloud_rgb_ignores_out_of_range_hex_values(self):
+        """Invalid cloud RGB integers should not crash update handling."""
+        assert infer_rgb_color({"colorHEXDecimal": -1}) is None
+        assert infer_rgb_color({"colorHEXDecimal": 0x1000000}) is None
 
     def test_apply_cloud_state_ignores_stale_cloud_during_local_write_grace_window(
         self,

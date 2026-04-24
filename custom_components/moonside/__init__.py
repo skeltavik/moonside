@@ -180,14 +180,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ]
 
                 if entity_entries:
-                    await instance.set_pixel(pixel_id, brightness)
-                    await instance.apply_pixels()
-                    LOGGER.debug(
-                        "Set pixel %d to brightness %d for %s",
-                        pixel_id,
-                        brightness,
-                        instance.name,
-                    )
+                    if await instance.set_pixel(pixel_id, brightness):
+                        if await instance.apply_pixels():
+                            LOGGER.debug(
+                                "Set pixel %d to brightness %d for %s",
+                                pixel_id,
+                                brightness,
+                                instance.name,
+                            )
+                        else:
+                            LOGGER.warning("Failed to apply pixels for %s", instance.name)
+                    else:
+                        LOGGER.warning("Failed to set pixel for %s", instance.name)
                     break
 
         hass.services.async_register(
@@ -213,8 +217,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ]
 
                 if entity_entries:
-                    await instance.pulse(duration)
-                    LOGGER.debug("Pulse executed for %s", instance.name)
+                    if await instance.pulse(duration):
+                        LOGGER.debug("Pulse executed for %s", instance.name)
+                    else:
+                        LOGGER.warning("Pulse failed for %s", instance.name)
                     break
 
         hass.services.async_register(
@@ -241,8 +247,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ]
 
                 if entity_entries:
-                    await instance.strobe(count, duration)
-                    LOGGER.debug("Strobe executed for %s", instance.name)
+                    if await instance.strobe(count, duration):
+                        LOGGER.debug("Strobe executed for %s", instance.name)
+                    else:
+                        LOGGER.warning("Strobe failed for %s", instance.name)
                     break
 
         hass.services.async_register(
@@ -269,8 +277,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ]
 
                 if entity_entries:
-                    await instance.color_cycle(colors, duration)
-                    LOGGER.debug("Color cycle executed for %s", instance.name)
+                    if await instance.color_cycle(colors, duration):
+                        LOGGER.debug("Color cycle executed for %s", instance.name)
+                    else:
+                        LOGGER.warning("Color cycle failed for %s", instance.name)
                     break
 
         hass.services.async_register(

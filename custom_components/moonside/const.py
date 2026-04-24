@@ -156,9 +156,9 @@ THEMES = {
 
 
 # List of effect names for UI
-def get_effect_list():
+def get_effect_list() -> list[str]:
     """Return list of effect names for UI display."""
-    return [name for name in THEMES.keys()]
+    return [theme[0] for theme in THEMES.values()]
 
 
 def get_effect_display_name(effect_key: str) -> str:
@@ -168,7 +168,7 @@ def get_effect_display_name(effect_key: str) -> str:
     return effect_key
 
 
-def get_theme_command(effect_key: str) -> str:
+def get_theme_command(effect_key: str) -> str | None:
     """Generate the full theme command for a given effect key."""
     if effect_key not in THEMES:
         return None
@@ -178,8 +178,11 @@ def get_theme_command(effect_key: str) -> str:
 
 
 # Effect mapping for LightEntity
-def get_effect_key_from_name(effect_name: str) -> str:
+def get_effect_key_from_name(effect_name: str) -> str | None:
     """Find effect key from display name."""
+    if effect_name in THEMES:
+        return effect_name
+
     for key, (name, _, _) in THEMES.items():
         if name == effect_name:
             return key

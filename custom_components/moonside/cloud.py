@@ -204,7 +204,7 @@ def infer_brightness(device_state: dict[str, Any]) -> int | None:
     command = str(device_state.get("controlData", ""))
     if command.upper().startswith("BRIGH"):
         try:
-            return _scale_cloud_brightness(int(command[5:]))
+            return _scale_device_brightness(int(command[5:]))
         except ValueError:
             return None
 
@@ -224,7 +224,7 @@ def infer_rgb_color(device_state: dict[str, Any]) -> tuple[int, int, int] | None
             )
 
     hex_value = device_state.get("colorHEXDecimal")
-    if isinstance(hex_value, int):
+    if isinstance(hex_value, int) and 0 <= hex_value <= 0xFFFFFF:
         hex_string = f"{hex_value:06x}"
         return (
             int(hex_string[0:2], 16),
@@ -247,4 +247,9 @@ def _scale_cloud_brightness(value: int) -> int:
     """Scale cloud brightness to Home Assistant's 0-255 range."""
     if value <= 100:
         return max(0, min(255, round((value / 100) * 255)))
+    return _scale_device_brightness(value)
+
+
+def _scale_device_brightness(value: int) -> int:
+    """Scale device protocol brightness to Home Assistant's 0-255 range."""
     return max(0, min(255, round((value / 120) * 255)))

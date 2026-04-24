@@ -509,7 +509,8 @@ class MoonsideInstance:
             target_brightness = (
                 brightness if brightness is not None else self._brightness
             )
-            await self.set_brightness(target_brightness)
+            if not await self.set_brightness(target_brightness):
+                return False
             self._notify_state_listeners()
 
             return True
