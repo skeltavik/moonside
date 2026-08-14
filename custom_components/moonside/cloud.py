@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 from urllib.parse import quote
 
-from aiohttp import ClientResponse, ClientSession
+from aiohttp import ClientError, ClientResponse, ClientSession, ClientTimeout
 
 from .const import (
     FIREBASE_API_KEY,
@@ -49,47 +50,57 @@ class MoonsideCloudClient:
     async def async_fetch_devices(self) -> dict[str, dict[str, Any]]:
         """Fetch all devices for the authenticated account."""
         await self._ensure_authenticated()
-        response = await self._session.get(self._build_devices_url())
-        await self._raise_for_status(response)
-        payload: dict[str, dict[str, Any]] | None = await response.json()
-        return payload or {}
+        payload = await self._async_request_json("get", self._build_devices_url())
+        if payload is None:
+            return {}
+        if not isinstance(payload, dict) or not all(
+            isinstance(device_id, str) and isinstance(state, dict)
+            for device_id, state in payload.items()
+        ):
+            raise MoonsideCloudError("Cloud returned an invalid device list")
+        return payload
 
     async def async_create_account(self) -> None:
         """Create a Firebase email/password account and cache the issued tokens."""
-        response = await self._session.post(
+        payload = await self._async_request_json(
+            "post",
             f"{FIREBASE_SIGN_UP_URL}?key={self._api_key}",
             json={
                 "email": self._email,
                 "password": self._password,
                 "returnSecureToken": True,
             },
+            auth_request=True,
         )
-        await self._raise_for_status(response, auth_request=True)
-        payload = await response.json()
+        self._validate_auth_payload(payload, ("idToken", "refreshToken", "localId"))
         self._id_token = payload["idToken"]
         self._refresh_token = payload["refreshToken"]
         self._local_id = payload["localId"]
-        expires_in = int(payload.get("expiresIn", "3600"))
-        self._token_expiry = time.monotonic() + max(expires_in - 120, 60)
+        self._set_token_expiry(payload.get("expiresIn", "3600"))
 
     async def async_send_password_reset_email(self) -> None:
         """Send a Firebase password reset email."""
-        response = await self._session.post(
+        await self._async_request_json(
+            "post",
             f"{FIREBASE_OOB_URL}?key={self._api_key}",
             json={
                 "requestType": "PASSWORD_RESET",
                 "email": self._email,
             },
+            auth_request=True,
         )
-        await self._raise_for_status(response, auth_request=True)
 
     async def async_get_device_state(self, device_id: str) -> dict[str, Any]:
         """Fetch state for a single device."""
         await self._ensure_authenticated()
-        response = await self._session.get(self._build_device_url(device_id))
-        await self._raise_for_status(response)
-        payload: dict[str, Any] | None = await response.json()
-        return payload or {}
+        payload = await self._async_request_json(
+            "get", self._build_device_url(device_id)
+        )
+        if payload is None:
+            return {}
+        if not isinstance(payload, dict):
+            raise MoonsideCloudError("Cloud returned an invalid device state")
+        return payload
 
     async def _ensure_authenticated(self) -> None:
         now = time.monotonic()
@@ -106,37 +117,37 @@ class MoonsideCloudClient:
         await self._login()
 
     async def _login(self) -> None:
-        response = await self._session.post(
+        payload = await self._async_request_json(
+            "post",
             f"{FIREBASE_IDENTITY_URL}?key={self._api_key}",
             json={
                 "email": self._email,
                 "password": self._password,
                 "returnSecureToken": True,
             },
+            auth_request=True,
         )
-        await self._raise_for_status(response, auth_request=True)
-        payload = await response.json()
+        self._validate_auth_payload(payload, ("idToken", "refreshToken", "localId"))
         self._id_token = payload["idToken"]
         self._refresh_token = payload["refreshToken"]
         self._local_id = payload["localId"]
-        expires_in = int(payload.get("expiresIn", "3600"))
-        self._token_expiry = time.monotonic() + max(expires_in - 120, 60)
+        self._set_token_expiry(payload.get("expiresIn", "3600"))
 
     async def _refresh(self) -> None:
-        response = await self._session.post(
+        payload = await self._async_request_json(
+            "post",
             f"{FIREBASE_TOKEN_REFRESH_URL}?key={self._api_key}",
-            json={
+            data={
                 "grant_type": "refresh_token",
                 "refresh_token": self._refresh_token,
             },
+            auth_request=True,
         )
-        await self._raise_for_status(response, auth_request=True)
-        payload = await response.json()
+        self._validate_auth_payload(payload, ("id_token", "refresh_token", "user_id"))
         self._id_token = payload["id_token"]
         self._refresh_token = payload["refresh_token"]
         self._local_id = payload["user_id"]
-        expires_in = int(payload.get("expires_in", "3600"))
-        self._token_expiry = time.monotonic() + max(expires_in - 120, 60)
+        self._set_token_expiry(payload.get("expires_in", "3600"))
 
     def _build_devices_url(self) -> str:
         if not self._local_id or not self._id_token:
@@ -148,6 +159,56 @@ class MoonsideCloudClient:
             raise MoonsideCloudAuthError("Client is not authenticated")
         encoded_device = quote(device_id, safe="")
         return f"{REALTIME_DATABASE_URL}/userDevices/{self._local_id}/{encoded_device}.json?auth={self._id_token}"
+
+    async def _async_request_json(
+        self,
+        method: str,
+        url: str,
+        *,
+        auth_request: bool = False,
+        json: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> Any:
+        """Execute a bounded cloud request and normalize transport failures."""
+        request = getattr(self._session, method)
+        try:
+            response = await request(
+                url,
+                json=json,
+                data=data,
+                timeout=ClientTimeout(total=10),
+            )
+            await self._raise_for_status(response, auth_request=auth_request)
+            return await response.json()
+        except MoonsideCloudError:
+            raise
+        except (ClientError, asyncio.TimeoutError, ValueError, TypeError) as err:
+            raise MoonsideCloudError(f"Cloud request failed: {err}") from err
+
+    @staticmethod
+    def _validate_auth_payload(payload: Any, required_fields: tuple[str, ...]) -> None:
+        """Validate fields required from a Firebase authentication response."""
+        if not isinstance(payload, dict) or any(
+            not isinstance(payload.get(field), str) or not payload[field]
+            for field in required_fields
+        ):
+            raise MoonsideCloudError(
+                "Cloud returned an invalid authentication response"
+            )
+
+    def _set_token_expiry(self, raw_expiry: Any) -> None:
+        """Validate and cache a Firebase token expiry value."""
+        try:
+            expires_in = int(raw_expiry)
+        except (TypeError, ValueError) as err:
+            raise MoonsideCloudError(
+                "Cloud returned an invalid authentication response"
+            ) from err
+        if expires_in <= 0:
+            raise MoonsideCloudError(
+                "Cloud returned an invalid authentication response"
+            )
+        self._token_expiry = time.monotonic() + max(expires_in - 120, 60)
 
     @staticmethod
     async def _raise_for_status(
@@ -217,11 +278,13 @@ def infer_rgb_color(device_state: dict[str, Any]) -> tuple[int, int, int] | None
     if command.upper().startswith("COLOR") and len(command) >= 14:
         payload = command[5:14]
         if payload.isdigit():
-            return (
+            rgb_color = (
                 int(payload[0:3]),
                 int(payload[3:6]),
                 int(payload[6:9]),
             )
+            if all(0 <= channel <= 255 for channel in rgb_color):
+                return rgb_color
 
     hex_value = device_state.get("colorHEXDecimal")
     if isinstance(hex_value, int) and 0 <= hex_value <= 0xFFFFFF:
@@ -237,7 +300,7 @@ def infer_rgb_color(device_state: dict[str, Any]) -> tuple[int, int, int] | None
 
 def infer_effect(device_state: dict[str, Any]) -> str | None:
     """Infer the active effect key from cloud control data."""
-    command = str(device_state.get("controlData", ""))
+    command = str(device_state.get("controlData", "")).strip()
     if not command.upper().startswith("THEME."):
         return None
     return get_effect_key_from_command(command)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import voluptuous as vol
 
@@ -18,6 +18,11 @@ from homeassistant.const import CONF_MAC, CONF_NAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
 from .cloud import MoonsideCloudAuthError, MoonsideCloudClient, MoonsideCloudError
 from .const import (
@@ -40,7 +45,7 @@ CONF_CLOUD_AUTH_ACTION = "cloud_auth_action"
 
 ACTION_SIGN_IN = "sign_in"
 ACTION_CREATE_ACCOUNT = "create_account"
-ACTION_RESET_PASSWORD = "reset_password"
+ACTION_RESET_PASSWORD = "reset_password"  # nosec B105
 
 CLOUD_AUTH_ACTIONS = {
     ACTION_SIGN_IN: "Sign in to existing account",
@@ -100,7 +105,12 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=defaults.get(
                         CONF_CLOUD_PASSWORD, options_data.get(CONF_CLOUD_PASSWORD, "")
                     ),
-                ): str,
+                ): TextSelector(
+                    TextSelectorConfig(
+                        type=TextSelectorType.PASSWORD,
+                        autocomplete="current-password",
+                    )
+                ),
                 vol.Optional(
                     CONF_CLOUD_DEVICE_ID,
                     default=defaults.get(
@@ -174,15 +184,19 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except MoonsideCloudError:
             return None, "cannot_connect", None
 
-        return {
-            CONF_CLOUD_EMAIL: email,
-            CONF_CLOUD_PASSWORD: password,
-            CONF_CLOUD_DEVICE_ID: device_id,
-            CONF_CLOUD_WRITE_GRACE_SECONDS: grace_seconds,
-        }, None, (
-            "Cloud account created. Use the Moonside app to bind devices if needed."
-            if action == ACTION_CREATE_ACCOUNT
-            else None
+        return (
+            {
+                CONF_CLOUD_EMAIL: email,
+                CONF_CLOUD_PASSWORD: password,
+                CONF_CLOUD_DEVICE_ID: device_id,
+                CONF_CLOUD_WRITE_GRACE_SECONDS: grace_seconds,
+            },
+            None,
+            (
+                "Cloud account created. Use the Moonside app to bind devices if needed."
+                if action == ACTION_CREATE_ACCOUNT
+                else None
+            ),
         )
 
     async def _async_step_cloud(
@@ -195,9 +209,11 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self._cloud_status_message = ""
-            cloud_options, error, status_message = await self._async_validate_cloud_input(
-                user_input
-            )
+            (
+                cloud_options,
+                error,
+                status_message,
+            ) = await self._async_validate_cloud_input(user_input)
             if error is None:
                 if cloud_options is None:
                     self._cloud_status_message = status_message or ""
@@ -280,7 +296,9 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Confirm discovery."""
-        assert self._discovery_info is not None
+        if self._discovery_info is None:
+            LOGGER.error("Bluetooth confirmation started without discovery context")
+            return cast(FlowResult, self.async_abort(reason="unknown"))
 
         discovery_info = self._discovery_info
         default_name = get_display_name_from_ble_name(discovery_info.name)
@@ -414,9 +432,11 @@ class MoonsideOptionsFlowHandler(config_entries.OptionsFlow):
 
         if user_input is not None:
             self._cloud_status_message = ""
-            cloud_options, error, status_message = (
-                await MoonsideConfigFlow._async_validate_cloud_input(self, user_input)
-            )
+            (
+                cloud_options,
+                error,
+                status_message,
+            ) = await MoonsideConfigFlow._async_validate_cloud_input(self, user_input)
             if error is None:
                 if cloud_options is None:
                     self._cloud_status_message = status_message or ""

@@ -1,4 +1,4 @@
-<img src="custom_components/moonside/icon.png" width="128" height="128" alt="Moonside Icon">
+<img src="custom_components/moonside/brand/logo.png" width="400" alt="Moonside logo">
 
 # Home Assistant Integration - Moonside
 
@@ -107,7 +107,7 @@ This integration uses the reverse-engineered BLE protocol for Moonside devices:
 
 ### Requirements
 
-- Home Assistant 2024.1.0 or newer
+- Home Assistant 2024.1.6 or newer
 - Bluetooth adapter with BLE support
 - Moonside device within Bluetooth range
 - Moonside account credentials only if you want optional cloud-backed state

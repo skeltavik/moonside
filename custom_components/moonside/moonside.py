@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Callable
 
 from bleak import BleakClient, BleakScanner
@@ -257,7 +257,9 @@ class MoonsideInstance:
 
     def _mark_local_write_pending(self) -> None:
         """Delay cloud reconciliation briefly after a successful local write."""
-        self._local_write_grace_until = datetime.now() + self._cloud_write_grace_period
+        self._local_write_grace_until = (
+            datetime.now(UTC) + self._cloud_write_grace_period
+        )
 
     def _ensure_cloud_client(self) -> MoonsideCloudClient | None:
         """Create the cloud client lazily when configured."""
@@ -314,9 +316,9 @@ class MoonsideInstance:
         """Apply normalized cloud state into the shared instance cache."""
         if (
             self._local_write_grace_until is not None
-            and datetime.now() < self._local_write_grace_until
+            and datetime.now(UTC) < self._local_write_grace_until
         ):
-            self._last_update = datetime.now()
+            self._last_update = datetime.now(UTC)
             return
 
         inferred_power = infer_power_state(device_state)
@@ -337,7 +339,7 @@ class MoonsideInstance:
         elif str(device_state.get("controlData", "")).upper().startswith("COLOR"):
             self._effect = None
 
-        self._last_update = datetime.now()
+        self._last_update = datetime.now(UTC)
 
     async def _refresh_cloud_state(self) -> None:
         """Refresh authoritative state from the Moonside cloud when configured."""
@@ -388,7 +390,7 @@ class MoonsideInstance:
             )
 
             self._connected = True
-            self._last_connected = datetime.now()
+            self._last_connected = datetime.now(UTC)
             LOGGER.debug("Connected to %s", self._name)
             return True
 
@@ -398,22 +400,27 @@ class MoonsideInstance:
             return False
 
     async def _send_command(self, command: str) -> bool:
-        """Send a command to the device.
+        """Send a single command to the device."""
+        return await self._send_commands([(command, 0.1)])
 
-        Args:
-            command: Command string to send
-
-        Returns:
-            True if command was sent successfully
-        """
+    async def _send_commands(self, commands: list[tuple[str, float]]) -> bool:
+        """Send a command sequence over one BLE connection."""
         async with self._lock:
             if not await self._ensure_connected():
                 self._notify_state_listeners()
                 return False
 
+            commands_sent = 0
             try:
                 # Get the RX characteristic
-                service = self._client.services.get_service(UART_SERVICE_UUID)
+                client = self._client
+                if client is None:
+                    LOGGER.error("BLE client missing after connection")
+                    self._connected = False
+                    self._notify_state_listeners()
+                    return False
+
+                service = client.services.get_service(UART_SERVICE_UUID)
                 if not service:
                     LOGGER.error("UART service not found")
                     self._connected = False
@@ -427,29 +434,48 @@ class MoonsideInstance:
                     self._notify_state_listeners()
                     return False
 
-                # Encode and send command
-                data = command.encode("utf-8")
-                LOGGER.debug("Sending command: %s", command)
+                for command, delay_after in commands:
+                    LOGGER.debug("Sending command: %s", command)
+                    await client.write_gatt_char(
+                        rx_char,
+                        command.encode("utf-8"),
+                        response=True,
+                    )
+                    commands_sent += 1
+                    if delay_after > 0:
+                        await asyncio.sleep(delay_after)
 
-                await self._client.write_gatt_char(rx_char, data, response=True)
-
-                # Small delay to ensure command is processed
-                await asyncio.sleep(0.1)
-                self._last_update = datetime.now()
+                self._last_update = datetime.now(UTC)
                 self._notify_state_listeners()
 
                 return True
 
+            except asyncio.CancelledError:
+                if commands_sent:
+                    self._mark_partial_write_uncertain()
+                self._notify_state_listeners()
+                raise
             except BLEAK_RETRY_EXCEPTIONS as ex:
                 LOGGER.debug("BLE error sending command: %s", ex)
+                if commands_sent:
+                    self._mark_partial_write_uncertain()
                 self._notify_state_listeners()
                 return False
             except Exception as ex:
                 LOGGER.error("Error sending command: %s", ex)
+                if commands_sent:
+                    self._mark_partial_write_uncertain()
                 self._notify_state_listeners()
                 return False
             finally:
                 await self._disconnect_client()
+
+    def _mark_partial_write_uncertain(self) -> None:
+        """Invalidate cached power state after a partially accepted command batch."""
+        self._power_state_known = False
+        self._power_state_source = "unknown"
+        self._local_write_grace_until = None
+        self._last_update = datetime.now(UTC)
 
     async def turn_on(self) -> bool:
         """Turn on the light."""
@@ -484,6 +510,9 @@ class MoonsideInstance:
 
         if await self._send_command(command):
             self._brightness = brightness
+            self._is_on = True
+            self._power_state_known = True
+            self._power_state_source = "local"
             self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
@@ -499,20 +528,20 @@ class MoonsideInstance:
             brightness: Optional brightness override (0-255)
         """
         r, g, b = rgb_color
-        command = f"{CMD_COLOR}{r:03d}{g:03d}{b:03d}"
+        color_command = f"{CMD_COLOR}{r:03d}{g:03d}{b:03d}"
+        target_brightness = brightness if brightness is not None else self._brightness
+        device_brightness = self._convert_brightness_to_device(target_brightness)
+        brightness_command = f"{CMD_BRIGHTNESS}{device_brightness:03d}"
 
-        if await self._send_command(command):
+        if await self._send_commands([(color_command, 0.1), (brightness_command, 0.1)]):
             self._rgb_color = rgb_color
+            self._brightness = target_brightness
             self._effect = None
+            self._is_on = True
+            self._power_state_known = True
+            self._power_state_source = "local"
             self._mark_local_write_pending()
-
-            target_brightness = (
-                brightness if brightness is not None else self._brightness
-            )
-            if not await self.set_brightness(target_brightness):
-                return False
             self._notify_state_listeners()
-
             return True
         return False
 
@@ -529,6 +558,9 @@ class MoonsideInstance:
 
         if await self._send_command(command):
             self._effect = effect_key
+            self._is_on = True
+            self._power_state_known = True
+            self._power_state_source = "local"
             self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
@@ -569,6 +601,28 @@ class MoonsideInstance:
             return False
         return await self._send_command(CMD_MODE_PIXEL)
 
+    async def set_and_apply_pixel(self, pixel_id: int, brightness: int) -> bool:
+        """Set and apply one pixel over a single BLE connection."""
+        if self.model != "Neon Lighthouse":
+            LOGGER.warning(
+                "Pixel control is only supported on Neon Lighthouse devices (device is %s)",
+                self.model,
+            )
+            return False
+        if pixel_id < 0 or pixel_id >= NUM_PIXELS:
+            LOGGER.error("Invalid pixel ID: %d", pixel_id)
+            return False
+        if brightness < 0 or brightness > MAX_BRIGHTNESS:
+            LOGGER.error("Invalid brightness: %d", brightness)
+            return False
+
+        return await self._send_commands(
+            [
+                (f"{CMD_PIXEL},{pixel_id},{brightness}", 0.1),
+                (CMD_MODE_PIXEL, 0),
+            ]
+        )
+
     async def update(self) -> bool:
         """Refresh device availability from Bluetooth advertisements.
 
@@ -589,31 +643,59 @@ class MoonsideInstance:
             return self.available
 
     async def pulse(self, duration: float = 0.5) -> bool:
-        if not await self._send_command(CMD_LED_ON):
+        if not await self._send_commands([(CMD_LED_ON, duration), (CMD_LED_OFF, 0)]):
             return False
-        await asyncio.sleep(duration)
-        if not await self._send_command(CMD_LED_OFF):
-            return False
+        self._is_on = False
+        self._power_state_known = True
+        self._power_state_source = "local"
+        self._mark_local_write_pending()
+        self._notify_state_listeners()
         return True
 
     async def strobe(self, count: int = 3, duration: float = 0.2) -> bool:
-        for _ in range(count):
-            if not await self._send_command(CMD_LED_ON):
-                return False
-            await asyncio.sleep(duration)
-            if not await self._send_command(CMD_LED_OFF):
-                return False
-            await asyncio.sleep(duration)
+        commands: list[tuple[str, float]] = []
+        for index in range(count):
+            commands.append((CMD_LED_ON, duration))
+            commands.append((CMD_LED_OFF, duration if index < count - 1 else 0))
+        if not await self._send_commands(commands):
+            return False
+        self._is_on = False
+        self._power_state_known = True
+        self._power_state_source = "local"
+        self._mark_local_write_pending()
+        self._notify_state_listeners()
         return True
 
     async def color_cycle(
         self, colors: list[tuple[int, int, int]], duration: float = 2.0
     ) -> bool:
+        if not colors:
+            return False
+
         delay = duration / len(colors)
+        device_brightness = self._convert_brightness_to_device(self._brightness)
+        commands: list[tuple[str, float]] = []
         for color in colors:
-            if not await self.set_color(color):
-                return False
-            await asyncio.sleep(delay)
+            r, g, b = color
+            commands.extend(
+                [
+                    (f"{CMD_COLOR}{r:03d}{g:03d}{b:03d}", 0.1),
+                    (
+                        f"{CMD_BRIGHTNESS}{device_brightness:03d}",
+                        round(0.1 + delay, 6),
+                    ),
+                ]
+            )
+
+        if not await self._send_commands(commands):
+            return False
+        self._rgb_color = colors[-1]
+        self._effect = None
+        self._is_on = True
+        self._power_state_known = True
+        self._power_state_source = "local"
+        self._mark_local_write_pending()
+        self._notify_state_listeners()
         return True
 
     async def stop(self) -> None:
@@ -646,14 +728,22 @@ async def discover_devices(
             LOGGER.debug("Found Moonside device: %s (%s)", device.address, name)
             devices_found.append((device.address, name))
 
+    scanner: BleakScanner | None = None
+    scanner_started = False
     try:
         LOGGER.debug("Starting Bluetooth scan for Moonside devices...")
         scanner = BleakScanner(detection_callback=device_found)
         await scanner.start()
+        scanner_started = True
         await asyncio.sleep(timeout)
-        await scanner.stop()
         LOGGER.debug("Scan complete. Found %d devices", len(devices_found))
     except Exception as ex:
         LOGGER.error("Error during device discovery: %s", ex)
+    finally:
+        if scanner is not None and scanner_started:
+            try:
+                await scanner.stop()
+            except Exception as ex:
+                LOGGER.debug("Error stopping Bluetooth scan: %s", ex)
 
     return devices_found

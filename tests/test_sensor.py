@@ -1,5 +1,6 @@
 """Tests for Moonside sensor platform."""
 
+from datetime import UTC
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.components.sensor import SensorDeviceClass
@@ -9,6 +10,7 @@ from custom_components.moonside.sensor import (
     MoonsideConnectionSensor,
     MoonsideLastUpdateSensor,
 )
+from custom_components.moonside.moonside import MoonsideInstance
 
 
 class TestMoonsideRssiSensor:
@@ -162,3 +164,14 @@ class TestMoonsideLastUpdateSensor:
 
         assert sensor.native_value == now
         assert sensor.device_class == SensorDeviceClass.TIMESTAMP
+
+    def test_last_update_sensor_provides_timezone_aware_timestamp(self):
+        """Timestamp sensors must provide timezone-aware datetimes to Home Assistant."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+        instance.apply_cloud_state({"controlData": "LEDON"})
+        sensor = MoonsideLastUpdateSensor(instance, "test_entry_id")
+        sensor.entity_id = "sensor.moonside_last_update"
+
+        assert sensor.native_value is not None
+        assert sensor.native_value.tzinfo is UTC
+        assert sensor.state.endswith("+00:00")

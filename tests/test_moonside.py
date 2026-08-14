@@ -1,11 +1,14 @@
 """Tests for Moonside BLE communication."""
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import voluptuous as vol
+from aiohttp import ClientConnectionError
+from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.helpers.selector import TextSelector, TextSelectorType
 
 from custom_components.moonside import (
     DOMAIN,
@@ -30,7 +33,10 @@ from custom_components.moonside.config_flow import (
 )
 from custom_components.moonside.cloud import (
     MoonsideCloudAuthError,
+    MoonsideCloudClient,
+    MoonsideCloudError,
     infer_brightness,
+    infer_effect,
     infer_rgb_color,
 )
 from custom_components.moonside.const import (
@@ -154,31 +160,49 @@ class TestMoonsideInstance:
             result = await instance.set_brightness(128)
             assert result is True
             assert instance.brightness == 128
+            assert instance.is_on is True
+            assert instance.power_state_source == "local"
 
     @pytest.mark.asyncio
     async def test_set_color(self):
         """Test set color command."""
         instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
 
-        with patch.object(instance, "_send_command", new=AsyncMock(return_value=True)):
+        with patch.object(instance, "_send_commands", new=AsyncMock(return_value=True)):
             result = await instance.set_color((255, 0, 0))
             assert result is True
             assert instance.rgb_color == (255, 0, 0)
 
     @pytest.mark.asyncio
-    async def test_set_color_fails_when_follow_up_brightness_write_fails(self):
-        """Color changes should not report success if brightness cannot be applied."""
+    async def test_set_color_batches_color_and_brightness(self):
+        """Color changes should use one BLE session for both protocol writes."""
         instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
 
-        with (
-            patch.object(instance, "_send_command", new=AsyncMock(return_value=True)),
-            patch.object(
-                instance, "set_brightness", new=AsyncMock(return_value=False)
-            ),
+        with patch.object(
+            instance, "_send_commands", new=AsyncMock(return_value=True)
+        ) as send_commands:
+            result = await instance.set_color((255, 0, 0), brightness=128)
+
+        assert result is True
+        send_commands.assert_awaited_once_with(
+            [("COLOR255000000", 0.1), ("BRIGH060", 0.1)]
+        )
+        assert instance.rgb_color == (255, 0, 0)
+        assert instance.brightness == 128
+
+    @pytest.mark.asyncio
+    async def test_set_color_does_not_update_state_when_batch_fails(self):
+        """Failed color batches should leave the cached state unchanged."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+        original_color = instance.rgb_color
+
+        with patch.object(
+            instance, "_send_commands", new=AsyncMock(return_value=False)
         ):
             result = await instance.set_color((255, 0, 0))
 
         assert result is False
+        assert instance.rgb_color == original_color
 
     def test_effect_list_uses_names_that_turn_on_accepts(self):
         """Effect dropdown values should map back to effect keys."""
@@ -189,26 +213,62 @@ class TestMoonsideInstance:
         assert get_effect_key_from_name("rainbow_one") == "rainbow_one"
 
     @pytest.mark.asyncio
+    async def test_set_effect_marks_power_state_on(self):
+        """Successful theme commands should mark the local power state as on."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+
+        with patch.object(instance, "_send_command", new=AsyncMock(return_value=True)):
+            result = await instance.set_effect("rainbow_one")
+
+        assert result is True
+        assert instance.is_on is True
+        assert instance.power_state_source == "local"
+
+    @pytest.mark.asyncio
+    async def test_set_and_apply_pixel_uses_one_ble_session(self):
+        """Pixel writes and MODEPIXEL should be sent over one connection."""
+        instance = MoonsideInstance(
+            "AA:BB:CC:DD:EE:FF", "Test", ble_name="MOONSIDE-LIGHTHOUSE"
+        )
+
+        with patch.object(
+            instance, "_send_commands", new=AsyncMock(return_value=True)
+        ) as send_commands:
+            result = await instance.set_and_apply_pixel(3, 80)
+
+        assert result is True
+        send_commands.assert_awaited_once_with([("PIXEL,3,80", 0.1), ("MODEPIXEL", 0)])
+
+    @pytest.mark.asyncio
     async def test_pulse(self):
         """Test pulse effect."""
         instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
 
-        with patch.object(instance, "_send_command", new=AsyncMock(return_value=True)):
+        with patch.object(
+            instance, "_send_commands", new=AsyncMock(return_value=True)
+        ) as send_commands:
             result = await instance.pulse(duration=0.1)
-            assert result is True
-            # Should call LEDON and LEDOFF
-            assert instance._send_command.call_count == 2
+
+        assert result is True
+        send_commands.assert_awaited_once_with([("LEDON", 0.1), ("LEDOFF", 0)])
+        assert instance.is_on is False
+        assert instance.power_state_source == "local"
 
     @pytest.mark.asyncio
     async def test_strobe(self):
         """Test strobe effect."""
         instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
 
-        with patch.object(instance, "_send_command", new=AsyncMock(return_value=True)):
+        with patch.object(
+            instance, "_send_commands", new=AsyncMock(return_value=True)
+        ) as send_commands:
             result = await instance.strobe(count=2, duration=0.1)
-            assert result is True
-            # Should call LEDON and LEDOFF twice each
-            assert instance._send_command.call_count == 4
+
+        assert result is True
+        send_commands.assert_awaited_once_with(
+            [("LEDON", 0.1), ("LEDOFF", 0.1), ("LEDON", 0.1), ("LEDOFF", 0)]
+        )
+        assert instance.is_on is False
 
     @pytest.mark.asyncio
     async def test_color_cycle(self):
@@ -217,10 +277,54 @@ class TestMoonsideInstance:
 
         colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
 
-        with patch.object(instance, "set_color", new=AsyncMock(return_value=True)):
+        with patch.object(
+            instance, "_send_commands", new=AsyncMock(return_value=True)
+        ) as send_commands:
             result = await instance.color_cycle(colors, duration=0.3)
-            assert result is True
-            assert instance.set_color.call_count == 3
+
+        assert result is True
+        send_commands.assert_awaited_once_with(
+            [
+                ("COLOR255000000", 0.1),
+                ("BRIGH120", 0.2),
+                ("COLOR000255000", 0.1),
+                ("BRIGH120", 0.2),
+                ("COLOR000000255", 0.1),
+                ("BRIGH120", 0.2),
+            ]
+        )
+        assert instance.rgb_color == (0, 0, 255)
+        assert instance.is_on is True
+
+    @pytest.mark.asyncio
+    async def test_partial_command_batch_marks_power_state_unknown(self):
+        """A partially accepted batch must not retain a stale cached power state."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+        instance._is_on = False
+        instance._power_state_known = True
+        instance._power_state_source = "local"
+        instance._local_write_grace_until = datetime.now(UTC) + timedelta(seconds=30)
+        client = MagicMock()
+        client.is_connected = True
+        client.write_gatt_char = AsyncMock(
+            side_effect=[None, RuntimeError("second write failed")]
+        )
+        client.disconnect = AsyncMock()
+        rx_char = MagicMock()
+        service = MagicMock()
+        service.get_characteristic.return_value = rx_char
+        client.services.get_service.return_value = service
+        instance._client = client
+
+        with patch.object(
+            instance, "_ensure_connected", new=AsyncMock(return_value=True)
+        ):
+            result = await instance.pulse(duration=0)
+
+        assert result is False
+        assert instance.is_on is None
+        assert instance.power_state_source == "unknown"
+        assert instance._local_write_grace_until is None
 
     @pytest.mark.asyncio
     async def test_send_command_uses_write_with_response(self):
@@ -255,6 +359,32 @@ class TestMoonsideInstance:
         assert instance.last_update is not None
         assert instance.is_connected is False
         assert instance._client is None
+
+    @pytest.mark.asyncio
+    async def test_send_commands_reuses_one_ble_connection(self):
+        """A command sequence should connect and disconnect only once."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
+        client = MagicMock()
+        client.is_connected = True
+        client.write_gatt_char = AsyncMock()
+        client.disconnect = AsyncMock()
+        rx_char = MagicMock()
+        service = MagicMock()
+        service.get_characteristic.return_value = rx_char
+        client.services.get_service.return_value = service
+        instance._client = client
+
+        with patch.object(
+            instance, "_ensure_connected", new=AsyncMock(return_value=True)
+        ) as ensure_connected:
+            result = await instance._send_commands(
+                [("COLOR255000000", 0), ("BRIGH120", 0)]
+            )
+
+        assert result is True
+        ensure_connected.assert_awaited_once()
+        assert client.write_gatt_char.await_count == 2
+        client.disconnect.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_send_command_notifies_listeners_on_failure(self):
@@ -496,6 +626,14 @@ class TestMoonsideInstance:
         assert infer_rgb_color({"colorHEXDecimal": -1}) is None
         assert infer_rgb_color({"colorHEXDecimal": 0x1000000}) is None
 
+    def test_cloud_rgb_rejects_out_of_range_command_channels(self):
+        """Cloud command RGB channels must stay within Home Assistant's range."""
+        assert infer_rgb_color({"controlData": "COLOR999999999"}) is None
+
+    def test_cloud_effect_matching_is_case_insensitive(self):
+        """Cloud effect commands should be normalized before matching."""
+        assert infer_effect({"controlData": " theme.rainbow1.20, "}) == "rainbow_one"
+
     def test_apply_cloud_state_ignores_stale_cloud_during_local_write_grace_window(
         self,
     ):
@@ -505,7 +643,7 @@ class TestMoonsideInstance:
         instance._power_state_known = True
         instance._brightness = 255
         instance._rgb_color = (255, 255, 255)
-        instance._local_write_grace_until = datetime.now() + timedelta(seconds=5)
+        instance._local_write_grace_until = datetime.now(UTC) + timedelta(seconds=5)
 
         instance.apply_cloud_state(
             {
@@ -525,7 +663,7 @@ class TestMoonsideInstance:
         instance._is_on = True
         instance._power_state_known = True
         instance._brightness = 255
-        instance._local_write_grace_until = datetime.now() - timedelta(seconds=1)
+        instance._local_write_grace_until = datetime.now(UTC) - timedelta(seconds=1)
 
         instance.apply_cloud_state(
             {
@@ -733,6 +871,72 @@ class TestMoonsideInstance:
         assert instance._last_seen_monotonic == 980
 
 
+class TestMoonsideCloudClient:
+    """Test cloud transport behavior."""
+
+    @pytest.mark.asyncio
+    async def test_fetch_devices_wraps_transport_errors(self):
+        """Connection failures should become stable integration errors."""
+        session = MagicMock()
+        session.get = AsyncMock(side_effect=ClientConnectionError("offline"))
+        client = MoonsideCloudClient(session, "user@example.com", "secret")
+        client._id_token = "token"
+        client._local_id = "user-id"
+        client._token_expiry = float("inf")
+
+        with pytest.raises(MoonsideCloudError, match="offline"):
+            await client.async_fetch_devices()
+
+    @pytest.mark.asyncio
+    async def test_fetch_devices_rejects_malformed_payload(self):
+        """Unexpected Firebase payload types should not escape into update logic."""
+        session = MagicMock()
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json = AsyncMock(return_value=[])
+        session.get = AsyncMock(return_value=response)
+        client = MoonsideCloudClient(session, "user@example.com", "secret")
+        client._id_token = "token"
+        client._local_id = "user-id"
+        client._token_expiry = float("inf")
+
+        with pytest.raises(MoonsideCloudError, match="device list"):
+            await client.async_fetch_devices()
+
+    @pytest.mark.asyncio
+    async def test_create_account_rejects_malformed_auth_payload(self):
+        """Malformed authentication responses should become cloud errors."""
+        session = MagicMock()
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json = AsyncMock(return_value=[])
+        session.post = AsyncMock(return_value=response)
+        client = MoonsideCloudClient(session, "user@example.com", "secret")
+
+        with pytest.raises(MoonsideCloudError, match="authentication response"):
+            await client.async_create_account()
+
+    @pytest.mark.asyncio
+    async def test_create_account_rejects_invalid_expiry(self):
+        """Malformed authentication expiry values should become cloud errors."""
+        session = MagicMock()
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.json = AsyncMock(
+            return_value={
+                "idToken": "id-token",
+                "refreshToken": "refresh-token",
+                "localId": "local-id",
+                "expiresIn": "not-a-number",
+            }
+        )
+        session.post = AsyncMock(return_value=response)
+        client = MoonsideCloudClient(session, "user@example.com", "secret")
+
+        with pytest.raises(MoonsideCloudError, match="authentication response"):
+            await client.async_create_account()
+
+
 class TestDiscoverDevices:
     """Test device discovery."""
 
@@ -768,9 +972,51 @@ class TestDiscoverDevices:
             assert scanner.kwargs == {}
             assert devices == [("UUID-ADDRESS", "MOONSIDE-O101")]
 
+    @pytest.mark.asyncio
+    async def test_discover_devices_stops_scanner_when_cancelled(self):
+        """Cancelled discovery must not leave a Bluetooth scan running."""
+        scanner = MagicMock()
+        scanner.start = AsyncMock()
+        scanner.stop = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.moonside.moonside.BleakScanner",
+                return_value=scanner,
+            ),
+            patch(
+                "custom_components.moonside.moonside.asyncio.sleep",
+                new=AsyncMock(side_effect=asyncio.CancelledError),
+            ),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await discover_devices(MagicMock(), timeout=1)
+
+        scanner.stop.assert_awaited_once()
+
 
 class TestConfigFlow:
     """Test config flow identity handling."""
+
+    @pytest.fixture(autouse=True)
+    def mock_clientsession(self):
+        """Avoid creating a real Home Assistant client session in flow tests."""
+        with patch(
+            "custom_components.moonside.config_flow.async_get_clientsession",
+            return_value=MagicMock(),
+        ):
+            yield
+
+    @pytest.mark.asyncio
+    async def test_bluetooth_confirm_aborts_without_discovery_context(self):
+        """An invalid confirm step should abort instead of relying on an assertion."""
+        flow = MoonsideConfigFlow()
+        flow.async_abort = MagicMock(return_value={"type": "abort"})
+
+        result = await flow.async_step_bluetooth_confirm()
+
+        assert result == {"type": "abort"}
+        flow.async_abort.assert_called_once_with(reason="unknown")
 
     @pytest.mark.asyncio
     async def test_bluetooth_confirm_stores_real_ble_name(self):
@@ -998,7 +1244,9 @@ class TestConfigFlow:
         discovery_info.name = None
         flow._discovered_devices = {"UUID-3": discovery_info}
 
-        result = await flow.async_step_user({CONF_MAC: "UUID-3", CONF_NAME: "Bedroom Lamp"})
+        result = await flow.async_step_user(
+            {CONF_MAC: "UUID-3", CONF_NAME: "Bedroom Lamp"}
+        )
 
         assert result == {"type": "form"}
         assert flow._entry_data == {
@@ -1480,8 +1728,81 @@ class TestIntegrationLifecycle:
         assert kwargs["cloud_device_id"] == "device-1"
         assert kwargs["cloud_write_grace_seconds"] == 25
 
+    @pytest.mark.asyncio
+    async def test_pulse_service_processes_all_selected_lights(self):
+        """A service call should target every selected Moonside light entry."""
+        hass = MagicMock()
+        hass.data = {}
+        hass.config_entries.async_forward_entry_setups = AsyncMock()
+        hass.bus.async_listen_once = MagicMock(return_value=MagicMock())
+        hass.services.has_service = MagicMock(return_value=False)
+        hass.services.async_register = MagicMock()
+
+        entry = MagicMock()
+        entry.entry_id = "entry-1"
+        entry.data = {CONF_MAC: "UUID-1", CONF_NAME: "Lamp One"}
+        entry.options = {}
+        entry.add_update_listener = MagicMock(return_value=MagicMock())
+        entry.async_on_unload = MagicMock()
+
+        first_instance = MagicMock()
+        first_instance.pulse = AsyncMock(return_value=True)
+        second_instance = MagicMock()
+        second_instance.pulse = AsyncMock(return_value=True)
+        sensor_only_instance = MagicMock()
+        sensor_only_instance.pulse = AsyncMock(return_value=True)
+
+        with patch(
+            "custom_components.moonside.MoonsideInstance", return_value=first_instance
+        ):
+            await async_setup_entry(hass, entry)
+
+        hass.data[DOMAIN]["entry-2"] = second_instance
+        hass.data[DOMAIN]["entry-3"] = sensor_only_instance
+        pulse_handler = next(
+            call.args[2]
+            for call in hass.services.async_register.call_args_list
+            if call.args[1] == SERVICE_PULSE
+        )
+        registry = MagicMock()
+        registry.entities.values.return_value = [
+            MagicMock(config_entry_id="entry-1", entity_id="light.first"),
+            MagicMock(config_entry_id="entry-2", entity_id="light.second"),
+            MagicMock(config_entry_id="entry-3", entity_id="sensor.diagnostic"),
+        ]
+
+        with patch(
+            "homeassistant.helpers.entity_registry.async_get", return_value=registry
+        ):
+            await pulse_handler(
+                MagicMock(
+                    data={
+                        ATTR_ENTITY_ID: [
+                            "light.first",
+                            "light.second",
+                            "sensor.diagnostic",
+                        ],
+                        "duration": 0.5,
+                    }
+                )
+            )
+
+        first_instance.pulse.assert_awaited_once_with(0.5)
+        second_instance.pulse.assert_awaited_once_with(0.5)
+        sensor_only_instance.pulse.assert_not_awaited()
+
+
 class TestOptionsFlow:
     """Test options flow behavior."""
+
+    @pytest.fixture(autouse=True)
+    def mock_clientsession(self):
+        """Avoid creating a real Home Assistant client session in flow tests."""
+        with patch(
+            "custom_components.moonside.config_flow.async_get_clientsession",
+            return_value=MagicMock(),
+        ):
+            yield
 
     @pytest.mark.asyncio
     async def test_options_flow_saves_cloud_settings(self):
@@ -1532,6 +1853,14 @@ class TestOptionsFlow:
         schema = kwargs["data_schema"]
         assert schema({})[CONF_CLOUD_AUTH_ACTION] == ACTION_SIGN_IN
         assert schema({})[CONF_CLOUD_WRITE_GRACE_SECONDS] == 25
+
+        password_field = next(
+            validator
+            for marker, validator in schema.schema.items()
+            if marker.schema == CONF_CLOUD_PASSWORD
+        )
+        assert isinstance(password_field, TextSelector)
+        assert password_field.config["type"] == TextSelectorType.PASSWORD
 
     @pytest.mark.asyncio
     async def test_options_flow_clears_cloud_settings_when_credentials_are_blank(self):

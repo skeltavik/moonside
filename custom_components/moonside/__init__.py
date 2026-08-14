@@ -18,6 +18,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import Event, HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_BLE_NAME,
@@ -120,6 +121,25 @@ def _validate_color_cycle_colors(value: str) -> list[tuple[int, int, int]]:
     return parsed_colors
 
 
+def _get_target_instances(
+    hass: HomeAssistant, entity_ids: list[str]
+) -> list[MoonsideInstance]:
+    """Return every Moonside instance targeted through one of its light entities."""
+    entity_registry = er.async_get(hass)
+    target_entry_ids = {
+        entity.config_entry_id
+        for entity in entity_registry.entities.values()
+        if entity.config_entry_id
+        and entity.entity_id.startswith("light.")
+        and entity.entity_id in entity_ids
+    }
+    return [
+        instance
+        for entry_id, instance in hass.data.get(DOMAIN, {}).items()
+        if entry_id in target_entry_ids
+    ]
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Moonside from a config entry."""
     mac_address = entry.data[CONF_MAC]
@@ -168,31 +188,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             pixel_id = call.data["pixel_id"]
             brightness = call.data["brightness"]
 
-            for entry_id, instance in hass.data[DOMAIN].items():
-                from homeassistant.helpers import entity_registry as er
-
-                ent_reg = er.async_get(hass)
-                entity_entries = [
-                    entry
-                    for entry in ent_reg.entities.values()
-                    if entry.config_entry_id == entry_id
-                    and entry.entity_id in entity_ids
-                ]
-
-                if entity_entries:
-                    if await instance.set_pixel(pixel_id, brightness):
-                        if await instance.apply_pixels():
-                            LOGGER.debug(
-                                "Set pixel %d to brightness %d for %s",
-                                pixel_id,
-                                brightness,
-                                instance.name,
-                            )
-                        else:
-                            LOGGER.warning("Failed to apply pixels for %s", instance.name)
-                    else:
-                        LOGGER.warning("Failed to set pixel for %s", instance.name)
-                    break
+            for instance in _get_target_instances(hass, entity_ids):
+                if await instance.set_and_apply_pixel(pixel_id, brightness):
+                    LOGGER.debug(
+                        "Set pixel %d to brightness %d for %s",
+                        pixel_id,
+                        brightness,
+                        instance.name,
+                    )
+                else:
+                    LOGGER.warning(
+                        "Failed to set and apply pixel for %s", instance.name
+                    )
 
         hass.services.async_register(
             DOMAIN,
@@ -205,23 +212,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entity_ids = call.data[ATTR_ENTITY_ID]
             duration = call.data["duration"]
 
-            for entry_id, instance in hass.data[DOMAIN].items():
-                from homeassistant.helpers import entity_registry as er
-
-                ent_reg = er.async_get(hass)
-                entity_entries = [
-                    entry
-                    for entry in ent_reg.entities.values()
-                    if entry.config_entry_id == entry_id
-                    and entry.entity_id in entity_ids
-                ]
-
-                if entity_entries:
-                    if await instance.pulse(duration):
-                        LOGGER.debug("Pulse executed for %s", instance.name)
-                    else:
-                        LOGGER.warning("Pulse failed for %s", instance.name)
-                    break
+            for instance in _get_target_instances(hass, entity_ids):
+                if await instance.pulse(duration):
+                    LOGGER.debug("Pulse executed for %s", instance.name)
+                else:
+                    LOGGER.warning("Pulse failed for %s", instance.name)
 
         hass.services.async_register(
             DOMAIN,
@@ -235,23 +230,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             count = call.data["count"]
             duration = call.data["duration"]
 
-            for entry_id, instance in hass.data[DOMAIN].items():
-                from homeassistant.helpers import entity_registry as er
-
-                ent_reg = er.async_get(hass)
-                entity_entries = [
-                    entry
-                    for entry in ent_reg.entities.values()
-                    if entry.config_entry_id == entry_id
-                    and entry.entity_id in entity_ids
-                ]
-
-                if entity_entries:
-                    if await instance.strobe(count, duration):
-                        LOGGER.debug("Strobe executed for %s", instance.name)
-                    else:
-                        LOGGER.warning("Strobe failed for %s", instance.name)
-                    break
+            for instance in _get_target_instances(hass, entity_ids):
+                if await instance.strobe(count, duration):
+                    LOGGER.debug("Strobe executed for %s", instance.name)
+                else:
+                    LOGGER.warning("Strobe failed for %s", instance.name)
 
         hass.services.async_register(
             DOMAIN,
@@ -265,23 +248,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             colors = call.data["colors"]
             duration = call.data["duration"]
 
-            for entry_id, instance in hass.data[DOMAIN].items():
-                from homeassistant.helpers import entity_registry as er
-
-                ent_reg = er.async_get(hass)
-                entity_entries = [
-                    entry
-                    for entry in ent_reg.entities.values()
-                    if entry.config_entry_id == entry_id
-                    and entry.entity_id in entity_ids
-                ]
-
-                if entity_entries:
-                    if await instance.color_cycle(colors, duration):
-                        LOGGER.debug("Color cycle executed for %s", instance.name)
-                    else:
-                        LOGGER.warning("Color cycle failed for %s", instance.name)
-                    break
+            for instance in _get_target_instances(hass, entity_ids):
+                if await instance.color_cycle(colors, duration):
+                    LOGGER.debug("Color cycle executed for %s", instance.name)
+                else:
+                    LOGGER.warning("Color cycle failed for %s", instance.name)
 
         hass.services.async_register(
             DOMAIN,
