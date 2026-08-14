@@ -3,7 +3,8 @@
 - Use `uv` for Python dependency and test workflows.
 - Do not install into the system Python environment.
 - Use the repo-local virtual environment at `.venv` when needed.
-- Install test dependencies with `uv pip install --python .venv/bin/python -r requirements-test.txt`.
-- Run lint with `uv run --python .venv/bin/python ruff check custom_components/moonside tests`.
-- Run tests with `PYTHONPATH=. uv run --python .venv/bin/python pytest`.
-- `PYTHONPATH=.` is required because this repo is not packaged with a `pyproject.toml`, so `custom_components` is otherwise not importable under `uv run`.
+- Python 3.14 is the supported development and CI runtime.
+- Install and lock development dependencies with `uv sync --locked --all-groups`.
+- Run lint with `uv run --locked ruff check custom_components/moonside tests`.
+- Run tests with `PYTHONPATH=. uv run --locked pytest`.
+- `PYTHONPATH=.` is required because this repository is not installed as a Python package.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any
 from urllib.parse import quote
@@ -182,7 +181,7 @@ class MoonsideCloudClient:
             return await response.json()
         except MoonsideCloudError:
             raise
-        except (ClientError, asyncio.TimeoutError, ValueError, TypeError) as err:
+        except (ClientError, TimeoutError, ValueError, TypeError) as err:
             raise MoonsideCloudError(f"Cloud request failed: {err}") from err
 
     @staticmethod

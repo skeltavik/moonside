@@ -21,49 +21,29 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Install test dependencies
-        run: |
-          uv venv --python 3.14 .venv
-          uv pip install --python .venv/bin/python -r requirements-test.txt
+        run: uv sync --locked --all-groups
       - name: Lint
-        run: uv run --python .venv/bin/python ruff check custom_components/moonside tests
+        run: uv run --locked ruff check custom_components/moonside tests
       - name: Check formatting
-        run: uv run --python .venv/bin/python ruff format --check custom_components/moonside tests
+        run: uv run --locked ruff format --check custom_components/moonside tests
       - name: Run tests
-        run: PYTHONPATH=. uv run --python .venv/bin/python pytest
+        run: PYTHONPATH=. uv run --locked pytest
+      - name: Check coverage
+        run: PYTHONPATH=. uv run --locked pytest --cov=custom_components.moonside --cov-report=term-missing
+      - name: Scan Python code
+        run: uv run --locked bandit -c pyproject.toml -r custom_components/moonside
       - name: Audit Python dependencies
         # Home Assistant currently pins cryptography 48.0.1. These advisories
         # affect the test stack, not a dependency shipped by this integration.
         # All other current and future findings still fail the workflow.
         run: |
-          uv run --python .venv/bin/python python -m pip_audit \
-            -r requirements-test.txt \
+          uv export --locked --group dev --no-hashes --no-emit-project \
+            --output-file /tmp/moonside-audit-requirements.txt
+          uv run --locked python -m pip_audit \
+            -r /tmp/moonside-audit-requirements.txt \
             --ignore-vuln PYSEC-2026-3552 \
             --ignore-vuln PYSEC-2026-3553 \
             --ignore-vuln PYSEC-2026-3554
-
-  minimum-version:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-      - name: Install minimum-version test environment
-        run: |
-          uv venv --python 3.12 .venv
-          # This harness pins HA 2024.1.5, which is older than the documented
-          # 2024.1.6 minimum and therefore exercises the same API baseline.
-          uv pip install --python .venv/bin/python \
-            "pytest-homeassistant-custom-component==0.13.91" \
-            "bleak>=0.22.3" \
-            "bleak-retry-connector>=3.5.0" \
-            pyserial
-      - name: Run minimum-version tests
-        run: PYTHONPATH=. uv run --python .venv/bin/python pytest
 
   hassfest:
     runs-on: ubuntu-latest

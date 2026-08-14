@@ -134,6 +134,17 @@ This integration uses the reverse-engineered BLE protocol for Moonside devices:
 3. If Home Assistant seems to revert too quickly or too slowly after local control, adjust **Cloud write grace seconds**
 4. If cloud auth fails, local BLE control should still work; only cloud-backed state refresh will be affected
 
+## Development
+
+Development and CI use Python 3.14 with dependencies and tool settings managed
+through `pyproject.toml` and the committed `uv.lock`:
+
+```console
+uv sync --locked --all-groups
+PYTHONPATH=. uv run --locked pytest
+uv run --locked ruff check custom_components/moonside tests
+```
+
 ## Credits
 
 - Reverse engineering research by [TheGreydiamond](https://thegreydiamond.de/blog/2022/10/10/reverse-engineering-moonside-lighthouse/)

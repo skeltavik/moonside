@@ -1,0 +1,60 @@
+[project]
+name = "moonside-home-assistant"
+version = "1.0.0"
+description = "Home Assistant integration for Moonside smart lights"
+readme = "README.md"
+requires-python = ">=3.14.2,<3.15"
+license = "MIT"
+authors = [
+  { name = "Bram Ruttens" },
+]
+keywords = ["bluetooth", "hacs", "home-assistant", "moonside"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.14",
+]
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "aiousbwatcher>=1.1.1",
+  "bandit>=1.9.2",
+  "bleak>=0.22.3",
+  "bleak-retry-connector>=3.5.0",
+  "homeassistant>=2026.6.0",
+  "pip-audit>=2.9.0",
+  "pyserial>=3.5",
+  "pytest>=9.0.3",
+  "pytest-asyncio>=1.4.0",
+  "pytest-cov>=7.0.0",
+  "pytest-homeassistant-custom-component>=0.13.336",
+  "ruff>=0.8.0",
+  "serialx>=1.8.2",
+  "voluptuous>=0.13.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+branch = true
+source = ["custom_components.moonside"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.bandit]
+exclude_dirs = ["tests"]
