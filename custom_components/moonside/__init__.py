@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
-import json
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_ENTITY_ID,

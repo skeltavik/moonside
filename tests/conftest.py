@@ -1,9 +1,10 @@
 """Test configuration for Moonside integration."""
 
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 
 
 @pytest.fixture

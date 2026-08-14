@@ -227,7 +227,7 @@ async def _extract_error_details(response: ClientResponse) -> str:
     """Return the most useful error string from a Firebase response."""
     try:
         payload = await response.json()
-    except Exception:  # pylint: disable=broad-except
+    except Exception:  # noqa: BLE001 - response decoders may raise arbitrary errors
         return await response.text()
 
     if isinstance(payload, dict):

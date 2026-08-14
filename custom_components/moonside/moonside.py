@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Callable
 
 from bleak import BleakClient, BleakScanner
+from bleak.backends.device import BLEDevice
+from bleak.backends.scanner import AdvertisementData
+from bleak_retry_connector import BLEAK_RETRY_EXCEPTIONS, establish_connection
 from homeassistant.components.bluetooth import (
     MONOTONIC_TIME,
     async_ble_device_from_address,
     async_last_service_info,
 )
 from homeassistant.core import HomeAssistant
-from bleak.backends.device import BLEDevice
-from bleak.backends.scanner import AdvertisementData
-from bleak_retry_connector import BLEAK_RETRY_EXCEPTIONS, establish_connection
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .cloud import (
@@ -29,17 +29,17 @@ from .cloud import (
     infer_rgb_color,
 )
 from .const import (
+    CMD_BRIGHTNESS,
     CMD_COLOR,
     CMD_LED_OFF,
     CMD_LED_ON,
-    CMD_BRIGHTNESS,
-    CMD_PIXEL,
     CMD_MODE_PIXEL,
+    CMD_PIXEL,
     DEFAULT_CLOUD_WRITE_GRACE_SECONDS,
-    UART_SERVICE_UUID,
-    UART_RX_CHAR_UUID,
     MAX_BRIGHTNESS,
     NUM_PIXELS,
+    UART_RX_CHAR_UUID,
+    UART_SERVICE_UUID,
     get_theme_command,
 )
 
@@ -360,7 +360,7 @@ class MoonsideInstance:
         if self._client and self._client.is_connected:
             try:
                 await self._client.disconnect()
-            except Exception as ex:
+            except Exception as ex:  # noqa: BLE001 - cleanup must not escape
                 LOGGER.debug("Error disconnecting: %s", ex)
 
         self._connected = False
@@ -394,7 +394,7 @@ class MoonsideInstance:
             LOGGER.debug("Connected to %s", self._name)
             return True
 
-        except Exception as ex:
+        except Exception as ex:  # noqa: BLE001 - connector errors vary by backend
             LOGGER.error("Failed to connect to %s: %s", self._name, ex)
             self._connected = False
             return False
@@ -461,7 +461,7 @@ class MoonsideInstance:
                     self._mark_partial_write_uncertain()
                 self._notify_state_listeners()
                 return False
-            except Exception as ex:
+            except Exception as ex:  # noqa: BLE001 - normalize unexpected BLE errors
                 LOGGER.error("Error sending command: %s", ex)
                 if commands_sent:
                     self._mark_partial_write_uncertain()
@@ -737,13 +737,13 @@ async def discover_devices(
         scanner_started = True
         await asyncio.sleep(timeout)
         LOGGER.debug("Scan complete. Found %d devices", len(devices_found))
-    except Exception as ex:
+    except Exception as ex:  # noqa: BLE001 - scanner backends raise varied errors
         LOGGER.error("Error during device discovery: %s", ex)
     finally:
         if scanner is not None and scanner_started:
             try:
                 await scanner.stop()
-            except Exception as ex:
+            except Exception as ex:  # noqa: BLE001 - cleanup must not escape
                 LOGGER.debug("Error stopping Bluetooth scan: %s", ex)
 
     return devices_found

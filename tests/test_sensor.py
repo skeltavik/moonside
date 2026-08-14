@@ -1,16 +1,17 @@
 """Tests for Moonside sensor platform."""
 
-from datetime import UTC
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+
+from custom_components.moonside.moonside import MoonsideInstance
 from custom_components.moonside.sensor import (
-    MoonsideRssiSensor,
     MoonsideConnectionSensor,
     MoonsideLastUpdateSensor,
+    MoonsideRssiSensor,
 )
-from custom_components.moonside.moonside import MoonsideInstance
 
 
 class TestMoonsideRssiSensor:
@@ -153,9 +154,7 @@ class TestMoonsideLastUpdateSensor:
 
     def test_last_update_sensor(self, mock_moonside_instance):
         """Test last update sensor."""
-        from datetime import datetime
-
-        now = datetime.now()
+        now = datetime.now(UTC)
         mock_moonside_instance.last_update = now
         sensor = MoonsideLastUpdateSensor(
             instance=mock_moonside_instance,

@@ -1,11 +1,13 @@
 """Tests for Moonside light platform."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 from homeassistant.components.light import ColorMode
 from homeassistant.core import State
-from custom_components.moonside.light import MoonsideLight
+
 from custom_components.moonside.const import DOMAIN
+from custom_components.moonside.light import MoonsideLight
 
 
 @pytest.fixture

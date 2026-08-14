@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
