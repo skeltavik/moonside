@@ -20,15 +20,15 @@ jobs:
           python-version: "3.14"
       - name: Set up uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.5"
       - name: Install test dependencies
         run: uv sync --locked --all-groups
       - name: Lint
         run: uv run --locked ruff check custom_components/moonside tests
       - name: Check formatting
         run: uv run --locked ruff format --check custom_components/moonside tests
-      - name: Run tests
-        run: PYTHONPATH=. uv run --locked pytest
-      - name: Check coverage
+      - name: Run tests with coverage
         run: PYTHONPATH=. uv run --locked pytest --cov=custom_components.moonside --cov-report=term-missing
       - name: Scan Python code
         run: uv run --locked bandit -c pyproject.toml -r custom_components/moonside
