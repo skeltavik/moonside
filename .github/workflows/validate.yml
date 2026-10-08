@@ -33,9 +33,8 @@ jobs:
       - name: Scan Python code
         run: uv run --locked bandit -c pyproject.toml -r custom_components/moonside
       - name: Audit Python dependencies
-        # Home Assistant currently pins cryptography 48.0.1. These advisories
-        # affect the test stack, not a dependency shipped by this integration.
-        # All other current and future findings still fail the workflow.
+        # Keep the audit strict; only the explicitly listed advisories are
+        # known to affect the test stack and are intentionally excluded.
         run: |
           uv export --locked --group dev --no-hashes --no-emit-project \
             --output-file /tmp/moonside-audit-requirements.txt

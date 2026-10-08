@@ -28,14 +28,19 @@ dev = [
   "pytest>=9.0.3",
   "pytest-asyncio>=1.4.0",
   "pytest-cov>=7.0.0",
-  "pytest-homeassistant-custom-component>=0.13.336",
+  "pytest-homeassistant-custom-component>=0.13.371",
   "ruff>=0.8.0",
-  "serialx>=1.8.2",
+  "serialx>=1.11.0",
   "voluptuous>=0.13.0",
 ]
 
 [tool.uv]
 package = false
+override-dependencies = [
+  "multidict>=6.9.1",
+  "urllib3>=2.8.0",
+  "PyJWT>=2.15.0",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
