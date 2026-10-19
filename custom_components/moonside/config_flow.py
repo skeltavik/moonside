@@ -198,12 +198,14 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
         )
 
-    async def _async_step_cloud(
+    async def async_step_cloud(
         self,
-        entry_data: dict[str, Any],
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
         """Collect optional cloud credentials before creating the entry."""
+        entry_data = self._entry_data
+        if entry_data is None:
+            return self.async_abort(reason="unknown")
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -310,7 +312,7 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if discovery_info.name:
                 self._entry_data[CONF_BLE_NAME] = discovery_info.name
 
-            return await self._async_step_cloud(self._entry_data)
+            return await self.async_step_cloud()
 
         self._set_confirm_only()
 
@@ -345,7 +347,7 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if discovery_info.name:
                 self._entry_data[CONF_BLE_NAME] = discovery_info.name
 
-            return await self._async_step_cloud(self._entry_data)
+            return await self.async_step_cloud()
 
         await self._async_collect_discovered_devices()
 
@@ -388,7 +390,7 @@ class MoonsideConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_MAC: mac_address,
                     CONF_NAME: user_input.get(CONF_NAME, DEFAULT_NAME),
                 }
-                return await self._async_step_cloud(self._entry_data)
+                return await self.async_step_cloud()
 
         return self.async_show_form(
             step_id="manual",

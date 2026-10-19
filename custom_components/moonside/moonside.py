@@ -381,10 +381,19 @@ class MoonsideInstance:
                 ble_device = async_ble_device_from_address(
                     self._hass, self._mac, connectable=True
                 )
+            else:
+                ble_device = await BleakScanner.find_device_by_address(
+                    self._mac, timeout=CONNECT_TIMEOUT
+                )
+
+            if ble_device is None:
+                LOGGER.error("Bluetooth device %s is not available", self._mac)
+                self._connected = False
+                return False
 
             self._client = await establish_connection(
                 BleakClient,
-                ble_device or self._mac,
+                ble_device,
                 self._name,
                 max_attempts=3,
             )

@@ -44,7 +44,8 @@ Home Assistant custom integration for Moonside smart lights using Bluetooth Low 
 1. Go to **Settings** → **Devices & Services** → **Add Integration**
 2. Search for "Moonside"
 3. Select your discovered device or enter the device identifier manually
-4. The light will appear as a new entity
+4. Leave the optional cloud email and password blank and submit to use local-only control
+5. The light will appear as a new entity
 
 ### Optional Cloud-Backed State
 
@@ -117,15 +118,17 @@ This integration uses the reverse-engineered BLE protocol for Moonside devices:
 ### Device Not Discovered
 
 1. Ensure your Moonside light is powered on and advertising over Bluetooth
-2. Check that your Home Assistant host has a working Bluetooth adapter
-3. Try moving the device closer to your Home Assistant host
-4. Use manual configuration with the device identifier if auto-discovery fails
+2. Check that your Home Assistant host has a working Bluetooth adapter and that it is not ignored under **Settings** → **Devices & Services**
+3. For Lamp One, set the Bluetooth adapter's scanning mode to **Active** if the device appears only as an unnamed address. Its `MOONSIDE-L1` name is returned in the scan response, which passive scanning does not request.
+4. Try moving the device closer to your Home Assistant host
+5. Use manual configuration with the Bluetooth device address if auto-discovery fails
 
 ### Connection Issues
 
 1. Ensure no other device (phone app) is currently connected to the light
 2. Check Home Assistant logs for BLE errors
 3. Restart the Moonside light by unplugging and plugging it back in
+4. If the device is not available through Home Assistant's Bluetooth adapters or proxies, restore Bluetooth discovery first. The integration does not bypass Home Assistant by connecting to a raw address on the local host.
 
 ### Cloud State Issues
 

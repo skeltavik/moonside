@@ -453,69 +453,58 @@ class TestMoonsideInstance:
         listener.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_ensure_connected_uses_home_assistant_ble_device(self):
-        """Use Home Assistant's discovered BLE device when available."""
-        hass = MagicMock()
-        ble_device = MagicMock()
-        client = MagicMock()
-        client.is_connected = True
-
-        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test", hass)
+    async def test_unavailable_ha_device_does_not_attempt_a_local_connection(self):
+        """A missing proxy device must not be connected through the HA host."""
+        instance = MoonsideInstance(
+            "AA:BB:CC:DD:EE:FF", "Bedroom Lamp", MagicMock(), ble_name="MOONSIDE-L1"
+        )
+        instance._is_on = False
+        instance._power_state_known = True
 
         with (
             patch(
                 "custom_components.moonside.moonside.async_ble_device_from_address",
-                return_value=ble_device,
+                return_value=None,
             ),
             patch(
                 "custom_components.moonside.moonside.async_last_service_info",
                 return_value=None,
             ),
             patch(
+                "custom_components.moonside.moonside.BleakScanner.find_device_by_address",
+                new=AsyncMock(side_effect=AssertionError("Must use HA discovery")),
+            ),
+            patch(
                 "custom_components.moonside.moonside.establish_connection",
-                new=AsyncMock(return_value=client),
-            ) as mock_connect,
+                new=AsyncMock(side_effect=AssertionError("Requires a BLEDevice")),
+            ),
         ):
-            result = await instance._ensure_connected()
+            assert await instance.turn_on() is False
 
-        assert result is True
-        assert instance.is_connected is True
-        assert instance.last_connected is not None
-        args, kwargs = mock_connect.await_args
-        assert args[1] is ble_device
-        assert args[2] == "Test"
-        assert kwargs == {"max_attempts": 3}
+        assert instance.is_on is False
+        assert instance.is_connected is False
+        assert instance.last_connected is None
 
     @pytest.mark.asyncio
-    async def test_ensure_connected_does_not_fall_back_to_discovered_device_name(self):
-        """Do not connect to a different device based on BLE name alone."""
-        hass = MagicMock()
-
-        instance = MoonsideInstance(
-            "AA:BB:CC:DD:EE:FF", "Bedroom Lamp", hass, ble_name="MOONSIDE-O101"
-        )
+    async def test_unavailable_standalone_device_preserves_unknown_power(self):
+        """No matching address must leave power unknown instead of claiming success."""
+        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Lamp One")
 
         with (
             patch(
-                "custom_components.moonside.moonside.async_ble_device_from_address",
-                return_value=None,
-            ),
-            patch(
-                "custom_components.moonside.moonside.async_last_service_info",
-                return_value=None,
+                "custom_components.moonside.moonside.BleakScanner.find_device_by_address",
+                new=AsyncMock(return_value=None),
             ),
             patch(
                 "custom_components.moonside.moonside.establish_connection",
-                new=AsyncMock(side_effect=AssertionError("Should not connect by name")),
-            ) as mock_connect,
+                new=AsyncMock(side_effect=AssertionError("Requires a BLEDevice")),
+            ),
         ):
-            result = await instance._ensure_connected()
+            assert await instance.turn_on() is False
 
-        assert result is False
-        args, kwargs = mock_connect.await_args
-        assert args[1] == "AA:BB:CC:DD:EE:FF"
-        assert args[2] == "Bedroom Lamp"
-        assert kwargs == {"max_attempts": 3}
+        assert instance.is_on is None
+        assert instance.is_connected is False
+        assert instance.last_connected is None
 
     @pytest.mark.asyncio
     async def test_update_returns_true_when_device_was_recently_advertised(self):
@@ -1279,17 +1268,14 @@ class TestConfigFlow:
         """Initial setup should save validated cloud settings into the created entry."""
         flow = MoonsideConfigFlow()
         flow.hass = MagicMock()
+        flow._entry_data = {CONF_MAC: "UUID-1", CONF_NAME: "Halo Lamp"}
         flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
 
         with patch(
             "custom_components.moonside.config_flow.MoonsideCloudClient.async_fetch_devices",
             new=AsyncMock(return_value={"device-1": {"deviceName": "Lamp"}}),
         ):
-            result = await flow._async_step_cloud(
-                {
-                    CONF_MAC: "UUID-1",
-                    CONF_NAME: "Halo Lamp",
-                },
+            result = await flow.async_step_cloud(
                 {
                     CONF_CLOUD_AUTH_ACTION: ACTION_SIGN_IN,
                     CONF_CLOUD_EMAIL: " user@example.com ",
@@ -1318,14 +1304,14 @@ class TestConfigFlow:
         """Initial setup should surface rejected cloud credentials before entry creation."""
         flow = MoonsideConfigFlow()
         flow.hass = MagicMock()
+        flow._entry_data = {CONF_MAC: "UUID-1", CONF_NAME: "Halo Lamp"}
         flow.async_show_form = MagicMock(return_value={"type": "form"})
 
         with patch(
             "custom_components.moonside.config_flow.MoonsideCloudClient.async_fetch_devices",
             new=AsyncMock(side_effect=MoonsideCloudAuthError("bad credentials")),
         ):
-            result = await flow._async_step_cloud(
-                {CONF_MAC: "UUID-1", CONF_NAME: "Halo Lamp"},
+            result = await flow.async_step_cloud(
                 {
                     CONF_CLOUD_AUTH_ACTION: ACTION_SIGN_IN,
                     CONF_CLOUD_EMAIL: "user@example.com",
@@ -1342,14 +1328,14 @@ class TestConfigFlow:
         """Initial setup should support creating a cloud account."""
         flow = MoonsideConfigFlow()
         flow.hass = MagicMock()
+        flow._entry_data = {CONF_MAC: "UUID-1", CONF_NAME: "Halo Lamp"}
         flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
 
         with patch(
             "custom_components.moonside.config_flow.MoonsideCloudClient.async_create_account",
             new=AsyncMock(return_value=None),
         ):
-            result = await flow._async_step_cloud(
-                {CONF_MAC: "UUID-1", CONF_NAME: "Halo Lamp"},
+            result = await flow.async_step_cloud(
                 {
                     CONF_CLOUD_AUTH_ACTION: ACTION_CREATE_ACCOUNT,
                     CONF_CLOUD_EMAIL: "new@example.com",
@@ -1368,14 +1354,14 @@ class TestConfigFlow:
         """Password reset should send the email and keep the user on the cloud form."""
         flow = MoonsideConfigFlow()
         flow.hass = MagicMock()
+        flow._entry_data = {CONF_MAC: "UUID-1", CONF_NAME: "Halo Lamp"}
         flow.async_show_form = MagicMock(return_value={"type": "form"})
 
         with patch(
             "custom_components.moonside.config_flow.MoonsideCloudClient.async_send_password_reset_email",
             new=AsyncMock(return_value=None),
         ):
-            result = await flow._async_step_cloud(
-                {CONF_MAC: "UUID-1", CONF_NAME: "Halo Lamp"},
+            result = await flow.async_step_cloud(
                 {
                     CONF_CLOUD_AUTH_ACTION: ACTION_RESET_PASSWORD,
                     CONF_CLOUD_EMAIL: "user@example.com",
