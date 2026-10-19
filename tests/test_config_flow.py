@@ -10,7 +10,9 @@ from custom_components.moonside.const import CONF_BLE_NAME, CONF_MAC, CONF_NAME,
 
 
 @pytest.mark.parametrize("source", ["manual", "user", "bluetooth"])
-async def test_setup_can_finish_without_cloud(hass, enable_custom_integrations, tmp_path, source):
+async def test_setup_can_finish_without_cloud(
+    hass, enable_custom_integrations, tmp_path, source
+):
     """Every setup route must reach and submit the optional cloud form."""
     hass.config.config_dir = str(tmp_path)
     components = Path(hass.config.path("custom_components"))
@@ -24,7 +26,10 @@ async def test_setup_can_finish_without_cloud(hass, enable_custom_integrations, 
 
     with (
         patch("homeassistant.config_entries.async_process_deps_reqs", new=AsyncMock()),
-        patch("custom_components.moonside.async_setup_entry", new=AsyncMock(return_value=True)),
+        patch(
+            "custom_components.moonside.async_setup_entry",
+            new=AsyncMock(return_value=True),
+        ),
         patch(
             "custom_components.moonside.config_flow.async_discovered_service_info",
             return_value=[discovery],
@@ -42,7 +47,9 @@ async def test_setup_can_finish_without_cloud(hass, enable_custom_integrations, 
         elif source == "user":
             selection[CONF_MAC] = discovery.address
 
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], selection)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], selection
+        )
         assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "cloud"
 

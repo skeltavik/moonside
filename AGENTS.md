@@ -6,5 +6,6 @@
 - Python 3.14 is the supported development and CI runtime.
 - Install and lock development dependencies with `uv sync --locked --all-groups`.
 - Run lint with `uv run --locked ruff check custom_components/moonside tests`.
+- Check formatting before pushing with `uv run --locked ruff format --check custom_components/moonside tests`.
 - Run tests with `PYTHONPATH=. uv run --locked pytest`.
 - `PYTHONPATH=.` is required because this repository is not installed as a Python package.

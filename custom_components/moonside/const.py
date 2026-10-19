@@ -135,7 +135,11 @@ THEMES = {
     "dancing_ocean": ("Dancing Ocean", "BEAT2", "7,200,249,13,34,135,"),
     "vibe_beat": ("Vibe Beat", "BEAT1", "0,255,0,200,200,200,200,200,200,"),
     # Theme patterns
-    "blue_raspberry_theme": ("Blue Raspberry (Theme)", "THEME1", "162,255,174,255,85,90,"),
+    "blue_raspberry_theme": (
+        "Blue Raspberry (Theme)",
+        "THEME1",
+        "162,255,174,255,85,90,",
+    ),
     "my_moon": ("My Moon", "THEME1", "255,0,0,0,0,255,"),
     "wire_tap": ("Wire Tap", "THEME2", "138,35,135,242,113,33,"),
     "raining_blue": ("Raining Blue", "COLORDROP1", "10,100,255,200,200,200,"),
