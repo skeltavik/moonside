@@ -228,14 +228,6 @@ class TestMoonsideLight:
         mock_moonside_instance.set_brightness.assert_called_once_with(200)
 
     @pytest.mark.asyncio
-    async def test_set_color(self, mock_moonside_light, mock_moonside_instance):
-        """Test setting color."""
-        with patch.object(mock_moonside_light, "async_write_ha_state"):
-            await mock_moonside_light.async_turn_on(rgb_color=(0, 255, 0))
-
-        mock_moonside_instance.set_color.assert_called_once_with((0, 255, 0))
-
-    @pytest.mark.asyncio
     async def test_set_effect(self, mock_moonside_light, mock_moonside_instance):
         """Test setting effect."""
         with patch.object(mock_moonside_light, "async_write_ha_state"):

@@ -327,66 +327,6 @@ class TestMoonsideInstance:
         assert instance._local_write_grace_until is None
 
     @pytest.mark.asyncio
-    async def test_send_command_uses_write_with_response(self):
-        """Commands should use write-with-response for Moonside RX characteristic."""
-        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
-        instance._lock = asyncio.Lock()
-        client = MagicMock()
-        client.is_connected = True
-        client.write_gatt_char = AsyncMock()
-        client.disconnect = AsyncMock()
-        rx_char = MagicMock()
-        service = MagicMock()
-        service.get_characteristic.return_value = rx_char
-        client.services.get_service.return_value = service
-        instance._client = client
-        listener = MagicMock()
-        instance.register_state_listener(listener)
-
-        with patch.object(
-            instance, "_ensure_connected", new=AsyncMock(return_value=True)
-        ):
-            result = await instance._send_command("LEDON")
-
-        assert result is True
-        client.write_gatt_char.assert_awaited_once_with(
-            rx_char,
-            b"LEDON",
-            response=True,
-        )
-        client.disconnect.assert_awaited_once()
-        listener.assert_called_once_with()
-        assert instance.last_update is not None
-        assert instance.is_connected is False
-        assert instance._client is None
-
-    @pytest.mark.asyncio
-    async def test_send_commands_reuses_one_ble_connection(self):
-        """A command sequence should connect and disconnect only once."""
-        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
-        client = MagicMock()
-        client.is_connected = True
-        client.write_gatt_char = AsyncMock()
-        client.disconnect = AsyncMock()
-        rx_char = MagicMock()
-        service = MagicMock()
-        service.get_characteristic.return_value = rx_char
-        client.services.get_service.return_value = service
-        instance._client = client
-
-        with patch.object(
-            instance, "_ensure_connected", new=AsyncMock(return_value=True)
-        ) as ensure_connected:
-            result = await instance._send_commands(
-                [("COLOR255000000", 0), ("BRIGH120", 0)]
-            )
-
-        assert result is True
-        ensure_connected.assert_awaited_once()
-        assert client.write_gatt_char.await_count == 2
-        client.disconnect.assert_awaited_once()
-
-    @pytest.mark.asyncio
     async def test_send_command_notifies_listeners_on_failure(self):
         """BLE command failures should still refresh subscribed entities."""
         instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")

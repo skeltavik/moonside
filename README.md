@@ -119,6 +119,9 @@ This integration uses the reverse-engineered BLE protocol for Moonside devices:
 - **Reads**: Bluetooth availability plus optional Moonside cloud state
 - **Cloud auth**: Firebase email/password login against the Moonside backend
 - **Grace window**: after a successful local BLE write, cloud reconciliation is suppressed briefly to avoid stale cloud state immediately rolling back the UI
+- **Dashboard updates**: local state is published after accepted writes without waiting for Bluetooth disconnect. Color and brightness are sent together, without an intermediate old-brightness state.
+- **Connection reuse**: successive commands reuse the Bluetooth connection. It is released after five seconds without commands so the phone app or another controller can reconnect; integration unload also releases it.
+- **External changes**: BLE exposes no live power/color/effect readback. Changes made in the Moonside app cannot be synchronized through BLE polling alone; optional cloud state is needed for external state refresh.
 
 ### Requirements
 

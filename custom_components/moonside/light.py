@@ -191,21 +191,13 @@ class MoonsideLight(RestoreEntity, LightEntity):
         if ATTR_RGB_COLOR in kwargs:
             rgb_color = kwargs[ATTR_RGB_COLOR]
 
-            if not self._instance.is_on:
-                await self._instance.turn_on()
-
-            await self._instance.set_color(rgb_color)
-
-            if brightness != self._instance.brightness:
-                await self._instance.set_brightness(brightness)
+            await self._instance.set_color(rgb_color, brightness=brightness)
 
             self.async_write_ha_state()
             return
 
         # Handle brightness only
         if ATTR_BRIGHTNESS in kwargs:
-            if not self._instance.is_on:
-                await self._instance.turn_on()
             await self._instance.set_brightness(brightness)
             self.async_write_ha_state()
             return

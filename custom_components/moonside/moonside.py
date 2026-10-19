@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 
 from bleak import BleakClient, BleakScanner
@@ -48,6 +49,7 @@ LOGGER = logging.getLogger(__name__)
 CONNECT_TIMEOUT = 30
 DISCONNECT_TIMEOUT = 5
 COMMAND_TIMEOUT = 10
+IDLE_DISCONNECT_SECONDS = 5
 ADVERTISEMENT_GRACE_PERIOD = timedelta(minutes=5)
 ADVERTISEMENT_GRACE_PERIOD_SECONDS = ADVERTISEMENT_GRACE_PERIOD.total_seconds()
 
@@ -106,6 +108,7 @@ class MoonsideInstance:
         self._ble_name = ble_name
         self._client: BleakClient | None = None
         self._connected = False
+        self._idle_disconnect_task: asyncio.Task[None] | None = None
         self._cloud_email = cloud_email.strip() if cloud_email else None
         self._cloud_password = cloud_password if cloud_password else None
         self._cloud_device_id = cloud_device_id.strip() if cloud_device_id else None
@@ -355,6 +358,21 @@ class MoonsideInstance:
         state = await cloud_client.async_get_device_state(device_id)
         self.apply_cloud_state(state)
 
+    async def _cancel_idle_disconnect(self) -> None:
+        """Cancel pending cleanup while holding the command lock."""
+        if task := self._idle_disconnect_task:
+            self._idle_disconnect_task = None
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    async def _disconnect_after_idle(self) -> None:
+        """Release Bluetooth for other controllers after a short idle window."""
+        await asyncio.sleep(IDLE_DISCONNECT_SECONDS)
+        async with self._lock:
+            await self._disconnect_client()
+            self._notify_state_listeners()
+
     async def _disconnect_client(self) -> None:
         """Disconnect and clear the cached BLE client."""
         if self._client and self._client.is_connected:
@@ -415,11 +433,13 @@ class MoonsideInstance:
     async def _send_commands(self, commands: list[tuple[str, float]]) -> bool:
         """Send a command sequence over one BLE connection."""
         async with self._lock:
+            await self._cancel_idle_disconnect()
             if not await self._ensure_connected():
                 self._notify_state_listeners()
                 return False
 
             commands_sent = 0
+            success = False
             try:
                 # Get the RX characteristic
                 client = self._client
@@ -455,6 +475,7 @@ class MoonsideInstance:
                         await asyncio.sleep(delay_after)
 
                 self._last_update = datetime.now(UTC)
+                success = True
                 self._notify_state_listeners()
 
                 return True
@@ -477,7 +498,12 @@ class MoonsideInstance:
                 self._notify_state_listeners()
                 return False
             finally:
-                await self._disconnect_client()
+                if success:
+                    self._idle_disconnect_task = asyncio.create_task(
+                        self._disconnect_after_idle()
+                    )
+                else:
+                    await self._disconnect_client()
 
     def _mark_partial_write_uncertain(self) -> None:
         """Invalidate cached power state after a partially accepted command batch."""
@@ -709,6 +735,7 @@ class MoonsideInstance:
 
     async def stop(self) -> None:
         async with self._lock:
+            await self._cancel_idle_disconnect()
             await self._disconnect_client()
 
 
