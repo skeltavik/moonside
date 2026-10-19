@@ -89,7 +89,7 @@ THEMES = {
     # Fire themes
     "night_fire": ("Night Fire", "FIRE1", "20,"),
     "green_fire": ("Green Fire", "FIRE2", "0,0,0,0,255,0,200,0,0,255,0,0,"),
-    "ghost_fire": ("Ghost Fire", "FIRE2", "0,0,0,255,0,0,0,0,255,255,255,255,"),
+    "ghost_fire": ("Ghost Fire", "FIRE2", "0,0,0,31,255,110,155,252,212,255,255,255,"),
     "rainbow_fire": ("Rainbow Fire", "FIRE2", "0,0,0,255,0,0,0,255,0,0,0,255,"),
     "magic_fire": ("Magic Fire", "FIRE2", "0,0,0,255,0,0,0,0,255,255,255,255,"),
     "glowing_lava": ("Glowing Lava", "LAVA1", "255,25,0,100,30,0,255,150,0,"),
@@ -115,7 +115,7 @@ THEMES = {
     "megatron": ("Megatron", "GRADIENT1", "198,255,221,247,45,50,"),
     "blue_raspberry": ("Blue Raspberry", "GRADIENT1", "255,0,0,0,50,200,"),
     "wizard": ("Wizard", "GRADIENT1", "0,255,0,200,200,200,"),
-    "orange_ocean": ("Orange Ocean", "GRADIENT1", "255,50,0,0,90,220,"),
+    "orange_ocean": ("Orange Ocean", "THEME4", "255,50,0,0,90,220,"),
     "jingle_bell": ("Jingle Bell", "GRADIENT2", "0,255,0,255,0,0,100,0,0,"),
     "celebration_candy": (
         "Celebration Candy",
@@ -131,11 +131,11 @@ THEMES = {
     # Beat themes
     "dancing_beat": ("Dancing Beat", "BEAT1", "255,0,0,0,255,0,0,0,255,"),
     "bouncing_stars": ("Bouncing Stars", "BEAT2", "255,255,0,0,0,255,"),
-    "shining_beat": ("Shining Beat", "BEAT1", "255,190,100,255,190,100,"),
+    "shining_beat": ("Shining Beat", "BEAT1", "255,190,100,255,190,100,255,190,100,"),
     "dancing_ocean": ("Dancing Ocean", "BEAT2", "7,200,249,13,34,135,"),
-    "vibe_beat": ("Vibe Beat", "BEAT1", "0,255,0,200,200,200,"),
+    "vibe_beat": ("Vibe Beat", "BEAT1", "0,255,0,200,200,200,200,200,200,"),
     # Theme patterns
-    "blue_raspberry_theme": ("Blue Raspberry", "THEME1", "162,255,174,255,85,90,"),
+    "blue_raspberry_theme": ("Blue Raspberry (Theme)", "THEME1", "162,255,174,255,85,90,"),
     "my_moon": ("My Moon", "THEME1", "255,0,0,0,0,255,"),
     "wire_tap": ("Wire Tap", "THEME2", "138,35,135,242,113,33,"),
     "raining_blue": ("Raining Blue", "COLORDROP1", "10,100,255,200,200,200,"),
@@ -152,7 +152,7 @@ THEMES = {
     "super_limeade": ("Super Limeade", "PULSING1", "115,255,182,250,255,204,"),
     "distant_night": ("Distant Night", "THEME1", "0,0,255,255,0,255,"),
     "wild_watermelon": ("Wild Watermelon", "THEME1", "255,0,0,0,255,0,"),
-    "ali": ("Ali", "THEME4", "255,66,20,255,66,20,8,217,255,"),
+    "ali": ("Ali", "GRADIENT2", "255,66,20,255,66,20,8,217,255,"),
     "vibrant_city": ("Vibrant City", "THEME5", "200,20,150,0,60,255,"),
     # Wave themes
     "pink_ball": ("Pink Ball", "WAVE1", "255,0,0,255,0,255,"),

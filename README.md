@@ -85,6 +85,20 @@ The integration includes 40+ built-in effects:
 
 Select effects from the "Effect" dropdown in the light entity.
 
+`Blue Raspberry` is the gradient preset; `Blue Raspberry (Theme)` is the separate
+two-color motion preset. Every preset has a distinct selectable name.
+
+Effect palettes follow the [published firmware format](https://developer.moonside.design/#themes).
+`Ali` uses the three-color gradient family and `Orange Ocean` the two-color
+`THEME4` family. `Shining Beat` and `Vibe Beat` include the required third RGB
+color by repeating the last color in their existing palettes.
+
+The BLE API has no lighting-command acknowledgement or live effect readback.
+Home Assistant's local effect state records the last successful write, not
+proof that the lamp is visibly rendering that effect. If an effect goes dark,
+report its exact name and device model; a successful BLE write alone cannot
+establish firmware compatibility.
+
 ## Technical Details
 
 ### Communication Protocol
