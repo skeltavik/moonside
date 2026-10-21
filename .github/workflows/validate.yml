@@ -36,10 +36,7 @@ jobs:
         # Keep the audit strict; only the explicitly listed advisories are
         # known to affect the test stack and are intentionally excluded.
         run: |
-          uv export --locked --group dev --no-hashes --no-emit-project \
-            --output-file /tmp/moonside-audit-requirements.txt
-          uv run --locked python -m pip_audit \
-            -r /tmp/moonside-audit-requirements.txt \
+          uv run --locked python -m pip_audit --local \
             --ignore-vuln PYSEC-2026-3552 \
             --ignore-vuln PYSEC-2026-3553 \
             --ignore-vuln PYSEC-2026-3554

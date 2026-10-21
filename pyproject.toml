@@ -38,8 +38,10 @@ dev = [
 package = false
 override-dependencies = [
   "multidict>=6.9.1",
-  "urllib3>=2.8.0",
+  "pillow>=13.0.0",
   "PyJWT>=2.15.0",
+  "urllib3>=2.8.0",
+  "uv>=0.13.4",
 ]
 
 [tool.pytest.ini_options]
