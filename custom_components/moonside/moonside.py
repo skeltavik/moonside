@@ -133,6 +133,8 @@ class MoonsideInstance:
         self._state_listeners: set[Callable[[], None]] = set()
 
         self._lock = asyncio.Lock()
+        self._cloud_lock = asyncio.Lock()
+        self._local_write_generation = 0
 
     def register_state_listener(self, listener: Callable[[], None]) -> None:
         """Register an entity state listener."""
@@ -228,6 +230,11 @@ class MoonsideInstance:
         """Return whether cloud-backed state is configured."""
         return bool(self._cloud_email and self._cloud_password and self._hass)
 
+    def _update_ble_name(self, name: str | None) -> None:
+        """Use Bluetooth metadata, never the user's display name, for the model."""
+        if isinstance(name, str) and name.upper().startswith("MOONSIDE-"):
+            self._ble_name = name
+
     def _update_advertisement_state(self) -> bool:
         """Refresh cached Bluetooth advertisement data."""
         if not self._hass:
@@ -246,6 +253,7 @@ class MoonsideInstance:
 
             self._rssi = service_info.rssi
             self._last_seen_monotonic = service_info.time
+            self._update_ble_name(service_info.name)
             return True
 
         return False
@@ -260,6 +268,7 @@ class MoonsideInstance:
 
     def _mark_local_write_pending(self) -> None:
         """Delay cloud reconciliation briefly after a successful local write."""
+        self._local_write_generation += 1
         self._local_write_grace_until = (
             datetime.now(UTC) + self._cloud_write_grace_period
         )
@@ -350,13 +359,17 @@ class MoonsideInstance:
         if cloud_client is None:
             return
 
+        generation = self._local_write_generation
+
         device_id = await self._resolve_cloud_device_id()
         if not device_id:
             LOGGER.debug("Unable to resolve Moonside cloud device for %s", self._name)
             return
 
         state = await cloud_client.async_get_device_state(device_id)
-        self.apply_cloud_state(state)
+        async with self._lock:
+            if generation == self._local_write_generation:
+                self.apply_cloud_state(state)
 
     async def _cancel_idle_disconnect(self) -> None:
         """Cancel pending cleanup while holding the command lock."""
@@ -408,6 +421,8 @@ class MoonsideInstance:
                 LOGGER.error("Bluetooth device %s is not available", self._mac)
                 self._connected = False
                 return False
+
+            self._update_ble_name(ble_device.name)
 
             self._client = await establish_connection(
                 BleakClient,
@@ -475,6 +490,7 @@ class MoonsideInstance:
                         await asyncio.sleep(delay_after)
 
                 self._last_update = datetime.now(UTC)
+                self._mark_local_write_pending()
                 success = True
                 self._notify_state_listeners()
 
@@ -507,6 +523,7 @@ class MoonsideInstance:
 
     def _mark_partial_write_uncertain(self) -> None:
         """Invalidate cached power state after a partially accepted command batch."""
+        self._local_write_generation += 1
         self._power_state_known = False
         self._power_state_source = "unknown"
         self._local_write_grace_until = None
@@ -518,7 +535,6 @@ class MoonsideInstance:
             self._is_on = True
             self._power_state_known = True
             self._power_state_source = "local"
-            self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
         return False
@@ -529,7 +545,6 @@ class MoonsideInstance:
             self._is_on = False
             self._power_state_known = True
             self._power_state_source = "local"
-            self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
         return False
@@ -548,7 +563,6 @@ class MoonsideInstance:
             self._is_on = True
             self._power_state_known = True
             self._power_state_source = "local"
-            self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
         return False
@@ -575,28 +589,31 @@ class MoonsideInstance:
             self._is_on = True
             self._power_state_known = True
             self._power_state_source = "local"
-            self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
         return False
 
-    async def set_effect(self, effect_key: str) -> bool:
-        """Set effect/theme.
-
-        Args:
-            effect_key: Effect key from THEMES dict
-        """
+    async def set_effect(self, effect_key: str, brightness: int | None = None) -> bool:
+        """Set an effect and optional brightness in one BLE command batch."""
         command = get_theme_command(effect_key)
         if not command:
             LOGGER.error("Unknown effect: %s", effect_key)
             return False
 
-        if await self._send_command(command):
+        commands = []
+        if not self.is_on:
+            commands.append((CMD_LED_ON, 0.1))
+        commands.append((command, 0.1))
+        if brightness is not None:
+            device_brightness = self._convert_brightness_to_device(brightness)
+            commands.append((f"{CMD_BRIGHTNESS}{device_brightness:03d}", 0.1))
+        if await self._send_commands(commands):
             self._effect = effect_key
+            if brightness is not None:
+                self._brightness = brightness
             self._is_on = True
             self._power_state_known = True
             self._power_state_source = "local"
-            self._mark_local_write_pending()
             self._notify_state_listeners()
             return True
         return False
@@ -608,6 +625,7 @@ class MoonsideInstance:
             pixel_id: Pixel ID (0-89)
             brightness: Brightness value (0-120)
         """
+        self._update_advertisement_state()
         if self.model != "Neon Lighthouse":
             LOGGER.warning(
                 "set_pixel is only supported on Neon Lighthouse devices (device is %s)",
@@ -628,6 +646,7 @@ class MoonsideInstance:
 
     async def apply_pixels(self) -> bool:
         """Apply pixel settings (Neon Lighthouse only)."""
+        self._update_advertisement_state()
         if self.model != "Neon Lighthouse":
             LOGGER.warning(
                 "apply_pixels is only supported on Neon Lighthouse devices (device is %s)",
@@ -638,6 +657,7 @@ class MoonsideInstance:
 
     async def set_and_apply_pixel(self, pixel_id: int, brightness: int) -> bool:
         """Set and apply one pixel over a single BLE connection."""
+        self._update_advertisement_state()
         if self.model != "Neon Lighthouse":
             LOGGER.warning(
                 "Pixel control is only supported on Neon Lighthouse devices (device is %s)",
@@ -666,6 +686,7 @@ class MoonsideInstance:
         """
         async with self._lock:
             self._update_advertisement_state()
+        async with self._cloud_lock:
             try:
                 await self._refresh_cloud_state()
             except MoonsideCloudAuthError as ex:
@@ -674,8 +695,8 @@ class MoonsideInstance:
                 )
             except MoonsideCloudError as ex:
                 LOGGER.debug("Moonside cloud refresh failed for %s: %s", self._name, ex)
-            self._notify_state_listeners()
-            return self.available
+        self._notify_state_listeners()
+        return self.available
 
     async def pulse(self, duration: float = 0.5) -> bool:
         if not await self._send_commands([(CMD_LED_ON, duration), (CMD_LED_OFF, 0)]):
@@ -683,7 +704,6 @@ class MoonsideInstance:
         self._is_on = False
         self._power_state_known = True
         self._power_state_source = "local"
-        self._mark_local_write_pending()
         self._notify_state_listeners()
         return True
 
@@ -697,7 +717,6 @@ class MoonsideInstance:
         self._is_on = False
         self._power_state_known = True
         self._power_state_source = "local"
-        self._mark_local_write_pending()
         self._notify_state_listeners()
         return True
 
@@ -729,7 +748,6 @@ class MoonsideInstance:
         self._is_on = True
         self._power_state_known = True
         self._power_state_source = "local"
-        self._mark_local_write_pending()
         self._notify_state_listeners()
         return True
 

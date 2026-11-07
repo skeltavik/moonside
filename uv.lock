@@ -1397,7 +1397,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/9a/02/cef85a80ff6d3092a
 
 [[package]]
 name = "moonside-home-assistant"
-version = "1.0.0"
+version = "1.1.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
@@ -1426,7 +1426,7 @@ dev = [
     { name = "bandit", specifier = ">=1.9.2" },
     { name = "bleak", specifier = ">=0.22.3" },
     { name = "bleak-retry-connector", specifier = ">=3.5.0" },
-    { name = "homeassistant", specifier = ">=2026.6.0" },
+    { name = "homeassistant", specifier = ">=2026.10.0" },
     { name = "pip-audit", specifier = ">=2.9.0" },
     { name = "pyserial", specifier = ">=3.5" },
     { name = "pytest", specifier = ">=9.0.3" },

@@ -15,6 +15,7 @@ from homeassistant.components.light import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -172,45 +173,34 @@ class MoonsideLight(RestoreEntity, LightEntity):
         """Turn on the light."""
         LOGGER.debug("Turn on called with kwargs: %s", kwargs)
 
-        # Handle brightness
         brightness = kwargs.get(ATTR_BRIGHTNESS, self._instance.brightness)
-
-        # Handle effect
         if ATTR_EFFECT in kwargs:
-            effect_name = kwargs[ATTR_EFFECT]
-            effect_key = get_effect_key_from_name(effect_name)
-
-            if effect_key:
-                if not self._instance.is_on:
-                    await self._instance.turn_on()
-                await self._instance.set_effect(effect_key)
-                self.async_write_ha_state()
-                return
-
-        # Handle RGB color
-        if ATTR_RGB_COLOR in kwargs:
-            rgb_color = kwargs[ATTR_RGB_COLOR]
-
-            await self._instance.set_color(rgb_color, brightness=brightness)
-
-            self.async_write_ha_state()
+            effect_key = get_effect_key_from_name(kwargs[ATTR_EFFECT])
+            if effect_key is None:
+                raise ServiceValidationError("Unknown Moonside effect")
+            success = await self._instance.set_effect(
+                effect_key, brightness=kwargs.get(ATTR_BRIGHTNESS)
+            )
+        elif ATTR_RGB_COLOR in kwargs:
+            success = await self._instance.set_color(
+                kwargs[ATTR_RGB_COLOR], brightness=brightness
+            )
+        elif ATTR_BRIGHTNESS in kwargs:
+            success = await self._instance.set_brightness(brightness)
+        elif self._instance.is_on:
             return
+        else:
+            success = await self._instance.turn_on()
 
-        # Handle brightness only
-        if ATTR_BRIGHTNESS in kwargs:
-            await self._instance.set_brightness(brightness)
-            self.async_write_ha_state()
-            return
-
-        # Just turn on
-        if not self._instance.is_on:
-            await self._instance.turn_on()
-            self.async_write_ha_state()
+        if not success:
+            raise HomeAssistantError("Failed to control Moonside light over Bluetooth")
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the light."""
         LOGGER.debug("Turn off called")
-        await self._instance.turn_off()
+        if not await self._instance.turn_off():
+            raise HomeAssistantError("Failed to turn off Moonside light over Bluetooth")
         self.async_write_ha_state()
 
     async def async_update(self) -> None:

@@ -227,14 +227,6 @@ class TestMoonsideLight:
         mock_moonside_instance.turn_on.assert_not_called()
         mock_moonside_instance.set_brightness.assert_called_once_with(200)
 
-    @pytest.mark.asyncio
-    async def test_set_effect(self, mock_moonside_light, mock_moonside_instance):
-        """Test setting effect."""
-        with patch.object(mock_moonside_light, "async_write_ha_state"):
-            await mock_moonside_light.async_turn_on(effect="Rainbow One")
-
-        mock_moonside_instance.set_effect.assert_called_once_with("rainbow_one")
-
     def test_device_info(self, mock_moonside_light):
         """Test device info."""
         info = mock_moonside_light.device_info

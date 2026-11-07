@@ -1,6 +1,6 @@
 [project]
 name = "moonside-home-assistant"
-version = "1.0.0"
+version = "1.1.0"
 description = "Home Assistant integration for Moonside smart lights"
 readme = "README.md"
 requires-python = ">=3.14.2,<3.15"
@@ -22,7 +22,7 @@ dev = [
   "bandit>=1.9.2",
   "bleak>=0.22.3",
   "bleak-retry-connector>=3.5.0",
-  "homeassistant>=2026.6.0",
+  "homeassistant>=2026.10.0",
   "pip-audit>=2.9.0",
   "pyserial>=3.5",
   "pytest>=9.0.3",

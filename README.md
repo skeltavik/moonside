@@ -38,6 +38,9 @@ understand the Moonside commands described below. Effect support can vary by fir
 5. Click "Install"
 6. Restart Home Assistant
 
+HACS downloads the versioned `moonside.zip` release asset rather than a snapshot
+of the moving default branch. A published release is required for installation.
+
 ### Manual Installation
 
 1. Copy the `custom_components/moonside` folder to your Home Assistant `config/custom_components` directory
@@ -50,6 +53,12 @@ understand the Moonside commands described below. Effect support can vary by fir
 3. Select your discovered device; if none are found, enter the Bluetooth device identifier manually
 4. Leave the optional cloud email and password blank and submit to use local-only control
 5. The light and three diagnostic sensors will appear as new entities
+
+For manually configured devices, the integration learns the model from a real
+Bluetooth advertisement or discovered BLE device and saves that metadata for
+the next restart. Your chosen display name is unchanged. Until that information
+is available, the model stays generic and Lighthouse-only pixel actions fail
+rather than guessing the device type.
 
 ### Optional Cloud-Backed State
 
@@ -119,6 +128,10 @@ establish firmware compatibility.
 Use these actions in scripts, automations, or **Developer Tools → Actions**.
 Replace the example entity IDs with your Moonside light entity IDs. Pass
 `entity_id` inside `data`, as shown; it can also be a list of Moonside lights.
+
+Failed Bluetooth writes raise a Home Assistant error so a blocking action call
+or automation can detect the failure. When targeting several lights, the custom
+action attempts every selected Moonside light before reporting any failures.
 
 | Action | Parameters and limits | Result |
 |--------|-----------------------|--------|
@@ -211,19 +224,20 @@ This integration uses the reverse-engineered BLE protocol for Moonside devices:
 - **Reads**: Bluetooth availability plus optional Moonside cloud state
 - **Cloud auth**: Firebase email/password login against the Moonside backend
 - **Grace window**: after a successful local BLE write, cloud reconciliation is suppressed briefly to avoid stale cloud state immediately rolling back the UI
-- **Dashboard updates**: local state is published after accepted writes without waiting for Bluetooth disconnect. Color and brightness are sent together, without an intermediate old-brightness state.
+- **Dashboard updates**: local state is published after accepted writes without waiting for Bluetooth disconnect. Color or effect selections can include brightness in the same BLE batch; the combined state is published only after that batch succeeds.
 - **Connection reuse**: successive commands reuse the Bluetooth connection. It is released after five seconds without commands so the phone app or another controller can reconnect; integration unload also releases it.
+- **Cloud isolation**: cloud network requests do not hold the BLE command lock. A response fetched before a successful or partially accepted local write is discarded, even when the grace window is set to zero.
 - **External changes**: BLE exposes no live power/color/effect readback. Changes made in the Moonside app cannot be synchronized through BLE polling alone; optional cloud state is needed for external state refresh.
 
 ### Requirements
 
-- Home Assistant 2024.1.6 or newer
+- Home Assistant 2026.10.0 or newer
 - Bluetooth adapter or Home Assistant Bluetooth proxy with BLE connection support
 - Moonside device within Bluetooth range
 - Moonside account credentials only if you want optional cloud-backed state
 
-The declared Home Assistant minimum is not exercised in CI. Development and CI
-use the Home Assistant version pinned in `uv.lock`.
+The supported minimum is the Home Assistant 2026.10.0 version exercised by the
+locked test environment and CI. Older Home Assistant versions are not supported.
 
 ## Troubleshooting
 
@@ -257,8 +271,38 @@ through `pyproject.toml` and the committed `uv.lock`:
 ```console
 uv sync --locked --all-groups
 PYTHONPATH=. uv run --locked pytest
-uv run --locked ruff check custom_components/moonside tests
+uv run --locked ruff check custom_components/moonside scripts tests
+uv run --locked ruff format --check custom_components/moonside scripts tests
 ```
+
+### Releases
+
+Set the same new version in `pyproject.toml` and
+`custom_components/moonside/manifest.json`, add its section to
+[CHANGELOG.md](CHANGELOG.md), and update `uv.lock`. Build locally from the
+repository root before tagging:
+
+```console
+uv run --locked python scripts/build_release.py v1.1.0 /tmp/moonside.zip
+```
+
+The builder rejects mismatched project, manifest, and tag versions. The ZIP
+contains the integration files at its root, including branding assets and no
+Python caches. For manual installation, extract it into
+`config/custom_components/moonside`, then restart Home Assistant.
+
+After committing a tested version, push its matching `v<version>` tag to run the
+release workflow. All validation jobs must pass before it creates a draft,
+uploads `moonside.zip` and `SHA256SUMS`, and publishes the release. Keep GitHub's
+repository **immutable releases** setting enabled: publication locks the release
+assets and associated tag and generates a signed release attestation. The
+workflow requires the published release to report `immutable: true` and verifies
+its attestation. It uses the ordinary workflow token, not an administrator token.
+
+Verify a published release with `gh release verify v1.1.0`. Checksums detect
+changed downloads; immutable releases prevent replacing published assets or
+retargeting their tag. They do not make unreviewed code or dependencies safe.
+Corrections must be shipped as a new version, not by replacing an existing ZIP.
 
 ## Credits
 

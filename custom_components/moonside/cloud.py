@@ -6,7 +6,13 @@ import time
 from typing import Any
 from urllib.parse import quote
 
-from aiohttp import ClientError, ClientResponse, ClientSession, ClientTimeout
+from aiohttp import (
+    ClientError,
+    ClientResponse,
+    ClientSession,
+    ClientTimeout,
+    ContentTypeError,
+)
 
 from .const import (
     FIREBASE_API_KEY,
@@ -17,6 +23,15 @@ from .const import (
     REALTIME_DATABASE_URL,
     get_effect_key_from_command,
 )
+
+_AUTH_ERROR_CODES = {
+    "EMAIL_EXISTS",
+    "EMAIL-ALREADY-IN-USE",
+    "EMAIL_NOT_FOUND",
+    "INVALID_LOGIN_CREDENTIALS",
+    "INVALID_PASSWORD",
+    "INVALID_EMAIL",
+}
 
 
 class MoonsideCloudError(Exception):
@@ -181,8 +196,12 @@ class MoonsideCloudClient:
             return await response.json()
         except MoonsideCloudError:
             raise
-        except (ClientError, TimeoutError, ValueError, TypeError) as err:
-            raise MoonsideCloudError(f"Cloud request failed: {err}") from err
+        except ContentTypeError, ValueError, TypeError:
+            raise MoonsideCloudError("Cloud returned an invalid response") from None
+        except TimeoutError:
+            raise MoonsideCloudError("Cloud request timed out") from None
+        except ClientError:
+            raise MoonsideCloudError("Cloud connection failed") from None
 
     @staticmethod
     def _validate_auth_payload(payload: Any, required_fields: tuple[str, ...]) -> None:
@@ -199,10 +218,10 @@ class MoonsideCloudClient:
         """Validate and cache a Firebase token expiry value."""
         try:
             expires_in = int(raw_expiry)
-        except (TypeError, ValueError) as err:
+        except TypeError, ValueError:
             raise MoonsideCloudError(
                 "Cloud returned an invalid authentication response"
-            ) from err
+            ) from None
         if expires_in <= 0:
             raise MoonsideCloudError(
                 "Cloud returned an invalid authentication response"
@@ -215,28 +234,30 @@ class MoonsideCloudClient:
     ) -> None:
         try:
             response.raise_for_status()
-        except Exception as err:  # pylint: disable=broad-except
-            details = await _extract_error_details(response)
+        except Exception:  # noqa: BLE001 - response errors may contain credentials
             if auth_request and response.status == 400:
-                raise MoonsideCloudAuthError(details) from err
-            raise MoonsideCloudError(details) from err
+                category = await _extract_auth_error(response)
+                raise MoonsideCloudAuthError(category) from None
+            raise MoonsideCloudError("Cloud request rejected") from None
 
 
-async def _extract_error_details(response: ClientResponse) -> str:
-    """Return the most useful error string from a Firebase response."""
+async def _extract_auth_error(response: ClientResponse) -> str:
+    """Return only recognized Firebase categories, never provider details."""
     try:
         payload = await response.json()
     except Exception:  # noqa: BLE001 - response decoders may raise arbitrary errors
-        return await response.text()
+        return "Cloud authentication failed"
 
     if isinstance(payload, dict):
         error = payload.get("error")
         if isinstance(error, dict):
             message = error.get("message")
-            if isinstance(message, str) and message:
-                return message
+            if isinstance(message, str):
+                code = message.partition(":")[0].strip().upper()
+                if code in _AUTH_ERROR_CODES:
+                    return code
 
-    return str(payload)
+    return "Cloud authentication failed"
 
 
 def infer_power_state(device_state: dict[str, Any]) -> bool | None:

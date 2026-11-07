@@ -4,6 +4,7 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -25,13 +26,13 @@ jobs:
       - name: Install test dependencies
         run: uv sync --locked --all-groups
       - name: Lint
-        run: uv run --locked ruff check custom_components/moonside tests
+        run: uv run --locked ruff check custom_components/moonside scripts tests
       - name: Check formatting
-        run: uv run --locked ruff format --check custom_components/moonside tests
+        run: uv run --locked ruff format --check custom_components/moonside scripts tests
       - name: Run tests with coverage
         run: PYTHONPATH=. uv run --locked pytest --cov=custom_components.moonside --cov-report=term-missing
       - name: Scan Python code
-        run: uv run --locked bandit -c pyproject.toml -r custom_components/moonside
+        run: uv run --locked bandit -c pyproject.toml -r custom_components/moonside scripts
       - name: Audit Python dependencies
         # Keep the audit strict; only the explicitly listed advisories are
         # known to affect the test stack and are intentionally excluded.

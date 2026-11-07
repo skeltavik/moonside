@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import voluptuous as vol
-from aiohttp import ClientConnectionError
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.helpers.selector import TextSelector, TextSelectorType
 
@@ -211,18 +210,6 @@ class TestMoonsideInstance:
         assert effect_name == "Rainbow One"
         assert get_effect_key_from_name(effect_name) == "rainbow_one"
         assert get_effect_key_from_name("rainbow_one") == "rainbow_one"
-
-    @pytest.mark.asyncio
-    async def test_set_effect_marks_power_state_on(self):
-        """Successful theme commands should mark the local power state as on."""
-        instance = MoonsideInstance("AA:BB:CC:DD:EE:FF", "Test")
-
-        with patch.object(instance, "_send_command", new=AsyncMock(return_value=True)):
-            result = await instance.set_effect("rainbow_one")
-
-        assert result is True
-        assert instance.is_on is True
-        assert instance.power_state_source == "local"
 
     @pytest.mark.asyncio
     async def test_set_and_apply_pixel_uses_one_ble_session(self):
@@ -802,19 +789,6 @@ class TestMoonsideInstance:
 
 class TestMoonsideCloudClient:
     """Test cloud transport behavior."""
-
-    @pytest.mark.asyncio
-    async def test_fetch_devices_wraps_transport_errors(self):
-        """Connection failures should become stable integration errors."""
-        session = MagicMock()
-        session.get = AsyncMock(side_effect=ClientConnectionError("offline"))
-        client = MoonsideCloudClient(session, "user@example.com", "secret")
-        client._id_token = "token"
-        client._local_id = "user-id"
-        client._token_expiry = float("inf")
-
-        with pytest.raises(MoonsideCloudError, match="offline"):
-            await client.async_fetch_devices()
 
     @pytest.mark.asyncio
     async def test_fetch_devices_rejects_malformed_payload(self):

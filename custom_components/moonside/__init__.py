@@ -16,7 +16,9 @@ from homeassistant.const import (
     Platform,
 )
 from homeassistant.core import Event, HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from .const import (
@@ -132,11 +134,14 @@ def _get_target_instances(
         and entity.entity_id.startswith("light.")
         and entity.entity_id in entity_ids
     }
-    return [
+    instances = [
         instance
         for entry_id, instance in hass.data.get(DOMAIN, {}).items()
         if entry_id in target_entry_ids
     ]
+    if not instances:
+        raise ServiceValidationError("Select a configured Moonside light")
+    return instances
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -167,9 +172,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = instance
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    def _async_save_ble_name() -> None:
+        """Persist discovered model metadata without changing the user's name."""
+        discovered_name = instance.ble_name
+        if _is_device_ble_name(discovered_name) and discovered_name != entry.data.get(
+            CONF_BLE_NAME
+        ):
+            hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_BLE_NAME: discovered_name}
+            )
+            registry = dr.async_get(hass)
+            if device := registry.async_get_device_by_identifier(
+                (DOMAIN, instance.address), entry.entry_id
+            ):
+                registry.async_update_device(device.id, model=instance.model)
 
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    instance.register_state_listener(_async_save_ble_name)
+    entry.async_on_unload(
+        lambda: instance.unregister_state_listener(_async_save_ble_name)
+    )
+    configured_options = dict(entry.options)
+
+    async def _async_options_updated(
+        hass: HomeAssistant, updated_entry: ConfigEntry
+    ) -> None:
+        if dict(updated_entry.options) != configured_options:
+            await hass.config_entries.async_reload(updated_entry.entry_id)
+
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     async def _async_stop(event: Event) -> None:
         """Handle Home Assistant stop event."""
@@ -186,6 +217,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entity_ids = call.data[ATTR_ENTITY_ID]
             pixel_id = call.data["pixel_id"]
             brightness = call.data["brightness"]
+            failed = []
 
             for instance in _get_target_instances(hass, entity_ids):
                 if await instance.set_and_apply_pixel(pixel_id, brightness):
@@ -196,9 +228,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         instance.name,
                     )
                 else:
-                    LOGGER.warning(
-                        "Failed to set and apply pixel for %s", instance.name
-                    )
+                    failed.append(instance.name)
+            if failed:
+                raise HomeAssistantError(
+                    f"Pixel control failed for: {', '.join(failed)}"
+                )
 
         hass.services.async_register(
             DOMAIN,
@@ -210,12 +244,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async def async_handle_pulse(call: ServiceCall) -> None:
             entity_ids = call.data[ATTR_ENTITY_ID]
             duration = call.data["duration"]
+            failed = []
 
             for instance in _get_target_instances(hass, entity_ids):
                 if await instance.pulse(duration):
                     LOGGER.debug("Pulse executed for %s", instance.name)
                 else:
-                    LOGGER.warning("Pulse failed for %s", instance.name)
+                    failed.append(instance.name)
+            if failed:
+                raise HomeAssistantError(f"Pulse failed for: {', '.join(failed)}")
 
         hass.services.async_register(
             DOMAIN,
@@ -228,12 +265,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entity_ids = call.data[ATTR_ENTITY_ID]
             count = call.data["count"]
             duration = call.data["duration"]
+            failed = []
 
             for instance in _get_target_instances(hass, entity_ids):
                 if await instance.strobe(count, duration):
                     LOGGER.debug("Strobe executed for %s", instance.name)
                 else:
-                    LOGGER.warning("Strobe failed for %s", instance.name)
+                    failed.append(instance.name)
+            if failed:
+                raise HomeAssistantError(f"Strobe failed for: {', '.join(failed)}")
 
         hass.services.async_register(
             DOMAIN,
@@ -246,12 +286,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entity_ids = call.data[ATTR_ENTITY_ID]
             colors = call.data["colors"]
             duration = call.data["duration"]
+            failed = []
 
             for instance in _get_target_instances(hass, entity_ids):
                 if await instance.color_cycle(colors, duration):
                     LOGGER.debug("Color cycle executed for %s", instance.name)
                 else:
-                    LOGGER.warning("Color cycle failed for %s", instance.name)
+                    failed.append(instance.name)
+            if failed:
+                raise HomeAssistantError(f"Color cycle failed for: {', '.join(failed)}")
 
         hass.services.async_register(
             DOMAIN,
@@ -355,11 +398,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, SERVICE_COLOR_CYCLE)
 
     return unload_ok
-
-
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Handle options update."""
-    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
