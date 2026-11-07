@@ -14,6 +14,8 @@ Home Assistant custom integration for Moonside smart lights using Bluetooth Low 
 - **Local BLE Control**: Direct Bluetooth commands for on/off, brightness, color, and effects
 - **Optional Cloud State**: Use Moonside cloud credentials to improve power/state readback in Home Assistant
 - **Configurable Reconciliation Window**: Delay cloud state reconciliation briefly after local BLE writes
+- **Automation Actions**: Set individual Lighthouse pixels, pulse, strobe, or cycle through RGB colors
+- **Diagnostics**: Signal strength, Bluetooth availability, and the last command/cloud-state update
 
 ## Supported Devices
 
@@ -21,7 +23,9 @@ Home Assistant custom integration for Moonside smart lights using Bluetooth Low 
 - Moonside Halo Lamp
 - Moonside Neon Lighthouse
 - Other Moonside BLE lights using the same UART command set
-- Other Moonside devices using Nordic UART Service over BLE
+
+Nordic UART Service alone does not establish compatibility: the device must
+understand the Moonside commands described below. Effect support can vary by firmware.
 
 ## Installation
 
@@ -43,9 +47,9 @@ Home Assistant custom integration for Moonside smart lights using Bluetooth Low 
 
 1. Go to **Settings** → **Devices & Services** → **Add Integration**
 2. Search for "Moonside"
-3. Select your discovered device or enter the device identifier manually
+3. Select your discovered device; if none are found, enter the Bluetooth device identifier manually
 4. Leave the optional cloud email and password blank and submit to use local-only control
-5. The light will appear as a new entity
+5. The light and three diagnostic sensors will appear as new entities
 
 ### Optional Cloud-Backed State
 
@@ -54,13 +58,24 @@ The integration works without any cloud configuration. If you want Home Assistan
 1. Go to **Settings** → **Devices & Services**
 2. Open the configured **Moonside** entry
 3. Click **Configure** / **Options**
-4. Enter:
+4. Select **Sign in to existing account** and enter:
    - **Cloud email** - your Moonside account email
    - **Cloud password** - your Moonside account password
    - **Cloud device ID** *(optional)* - only needed if auto-matching is not sufficient
    - **Cloud write grace seconds** *(optional, default: 10)* - how long Home Assistant should prefer fresh local BLE writes before accepting cloud reconciliation again
 
 When cloud state is configured, the integration keeps using BLE for local control but refreshes power, brightness, color, and effect state from Moonside's cloud when available.
+
+The cloud form is available during initial setup and in the integration options.
+Its **Cloud action** selector also supports:
+
+- **Create cloud account**: Enter an email and password. Creating an account does
+  not bind a lamp; use the Moonside app to bind devices if needed.
+- **Send password reset email**: Enter the account email; no password is required.
+  After sending the email, the form stays open rather than finishing setup.
+
+To disable cloud state later, select **Sign in to existing account**, clear both
+email and password, and submit the options form.
 
 ## Usage
 
@@ -99,6 +114,83 @@ proof that the lamp is visibly rendering that effect. If an effect goes dark,
 report its exact name and device model; a successful BLE write alone cannot
 establish firmware compatibility.
 
+### Automation Actions
+
+Use these actions in scripts, automations, or **Developer Tools → Actions**.
+Replace the example entity IDs with your Moonside light entity IDs. Pass
+`entity_id` inside `data`, as shown; it can also be a list of Moonside lights.
+
+| Action | Parameters and limits | Result |
+|--------|-----------------------|--------|
+| `moonside.set_pixel` | Required `pixel_id`: 0–89; required `brightness`: 0–120 | Sets and applies one pixel; only devices identified as **Neon Lighthouse** are accepted |
+| `moonside.pulse` | Optional `duration`: 0.1–5 seconds, default 0.5 | Turns on once, then off; does not restore the previous power state |
+| `moonside.strobe` | Optional `count`: 1–10, default 3; optional `duration`: 0.1–1 seconds per phase, default 0.2 | Repeats on/off and ends off |
+| `moonside.color_cycle` | Required `colors`: a JSON string containing one or more RGB triplets, integer channels 0–255; optional `duration`: 0.5–10 seconds, default 2 | Runs once at the cached brightness, ends on the last color, and clears the selected effect |
+
+Pixel brightness uses the device's 0–120 scale, not Home Assistant's 0–255
+brightness scale. `color_cycle` distributes `duration` across the colors;
+BLE command pacing and connection time add to the total elapsed time.
+Strobe produces flashing light; avoid it where flashing is unsafe.
+
+Set a Lighthouse pixel:
+
+```yaml
+action: moonside.set_pixel
+data:
+  entity_id: light.neon_lighthouse
+  pixel_id: 0
+  brightness: 60
+```
+
+Pulse once:
+
+```yaml
+action: moonside.pulse
+data:
+  entity_id: light.moonside
+  duration: 0.5
+```
+
+Strobe three times:
+
+```yaml
+action: moonside.strobe
+data:
+  entity_id: light.moonside
+  count: 3
+  duration: 0.2
+```
+
+Cycle through three colors:
+
+```yaml
+action: moonside.color_cycle
+data:
+  entity_id: light.moonside
+  colors: "[[255,0,0],[0,255,0],[0,0,255]]"
+  duration: 2
+```
+
+### Diagnostic Sensors
+
+Each configured device creates these sensors in addition to its light entity:
+
+| Sensor | Meaning |
+|--------|---------|
+| **Signal Strength** | RSSI in dBm from the latest accepted Bluetooth advertisement; not a live signal measurement |
+| **Connection Status** | `connected` while a BLE connection is held or an advertisement was seen within the last five minutes; otherwise `disconnected` |
+| **Last Update** | Time the integration last updated its command/cloud-state cache; not the last Bluetooth advertisement or confirmation of the physical light state |
+
+The sensors remain available when the lamp is unreachable so diagnostics stay
+visible; readings can be unknown until data is received. In particular,
+`connected` means Bluetooth availability, not necessarily an active connection.
+The RSSI value is retained when advertisements stop.
+
+The light's power state can initially be unknown, including after restoring
+saved state. Its `power_state_source` attribute distinguishes `unknown`,
+`restored`, `local`, and `cloud`; `power_state_cloud_derived` is true only for
+cloud-derived power state.
+
 ## Technical Details
 
 ### Communication Protocol
@@ -126,9 +218,12 @@ This integration uses the reverse-engineered BLE protocol for Moonside devices:
 ### Requirements
 
 - Home Assistant 2024.1.6 or newer
-- Bluetooth adapter with BLE support
+- Bluetooth adapter or Home Assistant Bluetooth proxy with BLE connection support
 - Moonside device within Bluetooth range
 - Moonside account credentials only if you want optional cloud-backed state
+
+The declared Home Assistant minimum is not exercised in CI. Development and CI
+use the Home Assistant version pinned in `uv.lock`.
 
 ## Troubleshooting
 
