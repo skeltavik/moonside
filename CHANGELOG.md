@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Wait for asynchronous GitHub release attestations with bounded retries and a fail-closed verification result.
+
 ## 1.1.0
 
 - Keep cloud credentials out of errors, tracebacks, and logs.

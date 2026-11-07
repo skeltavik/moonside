@@ -15,6 +15,7 @@ jobs:
   release:
     needs: checks
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     env:
@@ -61,4 +62,14 @@ jobs:
         run: |
           gh release edit "$RELEASE_TAG" --draft=false
           test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.immutable')" = true
-          gh release verify "$RELEASE_TAG"
+          # GitHub generates release attestations asynchronously after publication.
+          for attempt in {1..12}; do
+            if gh release verify "$RELEASE_TAG"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 12 ]; then
+              sleep 10
+            fi
+          done
+          echo "Release attestation could not be verified within the retry window" >&2
+          exit 1

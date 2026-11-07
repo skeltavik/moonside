@@ -297,7 +297,9 @@ uploads `moonside.zip` and `SHA256SUMS`, and publishes the release. Keep GitHub'
 repository **immutable releases** setting enabled: publication locks the release
 assets and associated tag and generates a signed release attestation. The
 workflow requires the published release to report `immutable: true` and verifies
-its attestation. It uses the ordinary workflow token, not an administrator token.
+its attestation, retrying within a bounded window while GitHub generates it
+asynchronously. Verification still fails closed if the attestation never becomes
+valid. It uses the ordinary workflow token, not an administrator token.
 
 Verify a published release with `gh release verify v1.1.0`. Checksums detect
 changed downloads; immutable releases prevent replacing published assets or

@@ -1,6 +1,7 @@
 """Exercise the release CLI and the archive installed by HACS."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -8,6 +9,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 BUILDER = REPOSITORY / "scripts" / "build_release.py"
@@ -99,3 +101,64 @@ def test_release_rejects_unmatched_tag(release_repository, tmp_path, tag):
     result = run_builder(release_repository, tag, archive)
     assert result.returncode != 0
     assert not archive.exists()
+
+
+@pytest.mark.parametrize("case", ["delayed", "never", "mutable"])
+def test_publication_waits_for_attestation_and_fails_closed(tmp_path, case):
+    """GitHub's asynchronous attestation must not make a valid release fail."""
+    workflow = yaml.safe_load(
+        (REPOSITORY / ".github/workflows/release.yml").read_text()
+    )
+    command = next(
+        step["run"]
+        for step in workflow["jobs"]["release"]["steps"]
+        if step["name"] == "Publish immutable release"
+    )
+    commands = tmp_path / "bin"
+    commands.mkdir()
+    gh = commands / "gh"
+    gh.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "args = sys.argv[1:]\n"
+        "if args[:2] == ['release', 'edit']:\n"
+        "    sys.exit(0)\n"
+        "if args[0] == 'api':\n"
+        "    print('false' if os.environ['RETRY_CASE'] == 'mutable' else 'true')\n"
+        "    sys.exit(0)\n"
+        "assert args[:2] == ['release', 'verify'], args\n"
+        "counter = Path(os.environ['ATTEMPTS'])\n"
+        "attempt = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+        "counter.write_text(str(attempt))\n"
+        "sys.exit(0 if os.environ['RETRY_CASE'] == 'delayed' and attempt >= 3 else 1)\n"
+    )
+    gh.chmod(0o755)
+    sleep = commands / "sleep"
+    sleep.write_text("#!/bin/sh\nexit 0\n")
+    sleep.chmod(0o755)
+    attempts = tmp_path / "attempts"
+    result = subprocess.run(
+        ["bash", "-e", "-c", command],
+        env={
+            **os.environ,
+            "PATH": f"{commands}:{os.environ['PATH']}",
+            "RELEASE_TAG": "v1.1.0",
+            "GITHUB_REPOSITORY": "example/moonside",
+            "RETRY_CASE": case,
+            "ATTEMPTS": str(attempts),
+        },
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    if case == "delayed":
+        assert result.returncode == 0, result.stderr
+        assert int(attempts.read_text()) == 3
+    else:
+        assert result.returncode != 0
+        if case == "mutable":
+            assert not attempts.exists()
+        else:
+            assert int(attempts.read_text()) > 1
